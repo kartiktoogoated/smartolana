@@ -93,7 +93,7 @@ pub struct InitProfile<'info> {
         seeds = [b"profile", authority.key().as_ref()],
         bump,
         payer = authority,
-        space = 8 + 32 + 4 + 32 + 1
+        space = UserProfile::LEN
     )]
     pub profile: Account<'info, UserProfile>,
 
@@ -135,7 +135,7 @@ pub struct InitValidator<'info> {
         seeds = [b"validator", authority.key().as_ref(), &id.to_le_bytes()],
         bump,
         payer = authority,
-        space = 8 + 8 + 4 + 32 + 1 + 32 + 32 + 1
+        space = ValidatorInfo::LEN
     )]
     pub validator: Account<'info, ValidatorInfo>,
 
@@ -216,17 +216,26 @@ pub struct CloseValidator<'info> {
 
 #[account]
 pub struct UserProfile {
-    pub authority: Pubkey,
-    pub name: String,
-    pub bump: u8,
+    pub authority: Pubkey,     // 32
+    pub name: String,          // 4 (length prefix) + max characters
+    pub bump: u8,              // 1
 }
+
+impl UserProfile {
+    pub const LEN: usize = 8 + 32 + 4 + 32 + 1; // 8 = discriminator, 32 = Pubkey, 4 + 32 = String, 1 = bump
+}
+
 
 #[account]
 pub struct ValidatorInfo {
-    pub id: u64,
-    pub name: String,
-    pub is_active: bool,
-    pub authority: Pubkey,
-    pub profile: Pubkey,
-    pub bump: u8,
-} 
+    pub id: u64,               // 8
+    pub name: String,          // 4 + 32
+    pub is_active: bool,       // 1
+    pub authority: Pubkey,     // 32
+    pub profile: Pubkey,       // 32
+    pub bump: u8,              // 1
+}
+
+impl ValidatorInfo {
+    pub const LEN: usize = 8 + 8 + 4 + 32 + 1 + 32 + 32 + 1; // 8 for discriminator
+}
