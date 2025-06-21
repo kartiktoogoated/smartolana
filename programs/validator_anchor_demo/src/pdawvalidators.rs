@@ -1,8 +1,4 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, MintTo, InitializeMint};
-use anchor_spl::associated_token::AssociatedToken;
-use anchor_lang::solana_program::program_pack::Pack;
-use anchor_spl::token::spl_token::state::Mint as SplMint;
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
@@ -10,6 +6,7 @@ declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 pub mod validator_anchor_demo {
     use super::*;
 
+    // Initialize profile PDA for a user
     pub fn init_profile(ctx: Context<InitProfile>, name: String) -> Result<()> {
         let profile = &mut ctx.accounts.profile;
         profile.authority = ctx.accounts.authority.key();
@@ -17,36 +14,8 @@ pub mod validator_anchor_demo {
         profile.bump = ctx.bumps.profile;
         Ok(())
     }
-
-    pub fn create_mint(ctx: Context<CreateMint>) -> Result<()> {
-        let mint_info = ctx.accounts.mint.to_account_info();
-        let mint_data = mint_info.try_borrow_data()?;
-        let is_initialized = SplMint::unpack(&mint_data).is_ok();
-
-        if !is_initialized {
-            let bump = ctx.bumps.mint_authority;
-            let signer_seeds: &[&[&[u8]]] = &[&[b"mint-authority", &[bump]]];
-
-            let cpi_ctx = CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                InitializeMint {
-                    mint: mint_info.clone(),
-                    rent: ctx.accounts.rent.to_account_info(),
-                },
-                signer_seeds,
-            );
-
-            token::initialize_mint(
-                cpi_ctx,
-                9,
-                ctx.accounts.mint_authority.key,
-                Some(ctx.accounts.mint_authority.key),
-            )?;
-        }
-
-        Ok(())
-    }
-
+    
+    // Create a validator PDA with unique ID under a profile
     pub fn init_validator(ctx: Context<InitValidator>, id: u64, name: String) -> Result<()> {
         let validator = &mut ctx.accounts.validator;
         validator.id = id;
@@ -55,24 +24,10 @@ pub mod validator_anchor_demo {
         validator.authority = ctx.accounts.authority.key();
         validator.profile = ctx.accounts.profile.key();
         validator.bump = ctx.bumps.validator;
-
-        let bump = ctx.bumps.mint_authority;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"mint-authority", &[bump]]];
-
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            MintTo {
-                mint: ctx.accounts.mint.to_account_info(),
-                to: ctx.accounts.validator_ata.to_account_info(),
-                authority: ctx.accounts.mint_authority.to_account_info(),
-            },
-            signer_seeds,
-        );
-
-        token::mint_to(cpi_ctx, 100_000_000_000)?; // 100 tokens with 9 decimals
         Ok(())
     }
 
+    // Update validator details
     pub fn update_validator(ctx: Context<UpdateValidator>, new_name: String, is_active: bool) -> Result<()> {
         let validator = &mut ctx.accounts.validator;
         validator.name = new_name;
@@ -80,17 +35,20 @@ pub mod validator_anchor_demo {
         Ok(())
     }
 
-    pub fn close_validator(_ctx: Context<CloseValidator>) -> Result<()> {
+    // Close validator and refund rent
+    pub fn close_validator(ctx: Context<CloseValidator>) -> Result<()> {
         Ok(())
     }
 }
+
+// Accounts Context
 
 #[derive(Accounts)]
 #[instruction(name: String)]
 pub struct InitProfile<'info> {
     #[account(
         init,
-        seeds = [b"profile", authority.key().as_ref()],
+        seeds =[b"profile", authority.key().as_ref()],
         bump,
         payer = authority,
         space = 8 + 32 + 4 + 32 + 1
@@ -99,32 +57,15 @@ pub struct InitProfile<'info> {
 
     #[account(mut)]
     pub authority: Signer<'info>,
+
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-pub struct CreateMint<'info> {
-    #[account(
-        init_if_needed,
-        payer = payer,
-        mint::decimals = 9,
-        mint::authority = mint_authority,
-        mint::freeze_authority = mint_authority,
-        seeds = [b"global-mint"],
-        bump
-    )]
-    pub mint: Account<'info, Mint>,
-
-    /// CHECK: PDA mint authority, validated via seed constraints
-    #[account(seeds = [b"mint-authority"], bump)]
-    pub mint_authority: UncheckedAccount<'info>,
-
-    #[account(mut)]
-    pub payer: Signer<'info>,
-
-    pub token_program: Program<'info, Token>,
-    pub rent: Sysvar<'info, Rent>,
-    pub system_program: Program<'info, System>,
+#[account]
+pub struct UserProfile {
+    pub authority: Pubkey,
+    pub name: String,
+    pub bump: u8,
 }
 
 #[derive(Accounts)]
@@ -136,6 +77,7 @@ pub struct InitValidator<'info> {
         bump,
         payer = authority,
         space = 8 + 8 + 4 + 32 + 1 + 32 + 32 + 1
+        // discriminator + id + name + bool + authority + profile + bump
     )]
     pub validator: Account<'info, ValidatorInfo>,
 
@@ -149,25 +91,7 @@ pub struct InitValidator<'info> {
     )]
     pub profile: Account<'info, UserProfile>,
 
-    #[account(
-        init,
-        payer = authority,
-        associated_token::mint = mint,
-        associated_token::authority = authority
-    )]
-    pub validator_ata: Account<'info, TokenAccount>,
-
-    /// CHECK: Mint authority PDA
-    #[account(seeds = [b"mint-authority"], bump)]
-    pub mint_authority: UncheckedAccount<'info>,
-
-    #[account(mut, seeds = [b"global-mint"], bump)]
-    pub mint: Account<'info, Mint>,
-
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
@@ -177,7 +101,7 @@ pub struct UpdateValidator<'info> {
         seeds = [b"validator", authority.key().as_ref(), &validator.id.to_le_bytes()],
         bump = validator.bump,
         has_one = authority,
-        has_one = profile
+        has_one = profile,
     )]
     pub validator: Account<'info, ValidatorInfo>,
 
@@ -186,7 +110,7 @@ pub struct UpdateValidator<'info> {
     #[account(
         seeds = [b"profile", authority.key().as_ref()],
         bump = profile.bump,
-        has_one = authority
+        has_one = authority,
     )]
     pub profile: Account<'info, UserProfile>,
 }
@@ -215,13 +139,6 @@ pub struct CloseValidator<'info> {
 }
 
 #[account]
-pub struct UserProfile {
-    pub authority: Pubkey,
-    pub name: String,
-    pub bump: u8,
-}
-
-#[account]
 pub struct ValidatorInfo {
     pub id: u64,
     pub name: String,
@@ -229,4 +146,4 @@ pub struct ValidatorInfo {
     pub authority: Pubkey,
     pub profile: Pubkey,
     pub bump: u8,
-} 
+}
