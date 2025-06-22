@@ -6,6 +6,8 @@ import {
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccount,
+  getAccount,
 } from "@solana/spl-token";
 
 describe("validator_anchor_demo", () => {
@@ -117,6 +119,61 @@ describe("validator_anchor_demo", () => {
     assert.strictEqual(account.authority.toBase58(), user.toBase58());
     assert.strictEqual(account.profile.toBase58(), profilePda.toBase58());
     assert.strictEqual(account.bump, validatorBump);
+  });
+
+  it("Transfers tokens to another user", async () => {
+    const recipient = anchor.web3.Keypair.generate();
+    const recipientAta = getAssociatedTokenAddressSync(mintPda, recipient.publicKey);
+
+    // Airdrop lamports to recipient so it can create ATA
+    await provider.connection.requestAirdrop(recipient.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL);
+    await new Promise((r) => setTimeout(r, 2000)); // Wait for airdrop finality
+
+    if (!provider.wallet || !provider.wallet.payer) {
+      throw new Error("Wallet or payer not available");
+    }
+
+    // Create recipient ATA manually
+    await createAssociatedTokenAccount(
+      provider.connection,
+      provider.wallet.payer, // // Signer that pays for the ATA creation
+      mintPda,
+      recipient.publicKey
+    );
+
+    console.log("🎯 Created ATA for recipient:", recipientAta.toBase58());
+
+    const senderBalanceBefore = await getAccount(provider.connection, validatorAta);
+    const recipientBalanceBefore = await getAccount(provider.connection, recipientAta);
+    console.log("💰 Sender balance before:", Number(senderBalanceBefore.amount));
+    console.log("💰 Recipient balance before:", Number(recipientBalanceBefore.amount));
+
+    // Transfer 10 tokens (10_000_000_000 with 9 decimals)
+    await program.methods
+      .transferTokens(new anchor.BN(10_000_000_000))
+      .accountsStrict({
+        sender: user,
+        from: validatorAta,
+        to: recipientAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+
+    const senderBalanceAfter = await getAccount(provider.connection, validatorAta);
+    const recipientBalanceAfter = await getAccount(provider.connection, recipientAta);
+    console.log("✅ Token transfer complete!");
+    console.log("💸 Sender balance after:", Number(senderBalanceAfter.amount));
+    console.log("🎉 Recipient balance after:", Number(recipientBalanceAfter.amount));
+
+    assert.strictEqual(
+      Number(senderBalanceBefore.amount) - 10_000_000_000,
+      Number(senderBalanceAfter.amount)
+    );
+
+    assert.strictEqual(
+      Number(recipientBalanceAfter.amount),
+      Number(recipientBalanceBefore.amount) + 10_000_000_000
+    );
   });
 
   it("Updates PDA validator info", async () => {

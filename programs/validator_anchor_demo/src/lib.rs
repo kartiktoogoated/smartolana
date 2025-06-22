@@ -1,3 +1,10 @@
+/**
+ * THE OVERALL FLOW 
+ * program logic,
+ * context structs,
+ * account structs
+ */
+
 use anchor_lang::prelude::*;
 use anchor_spl::token::{
     self, Mint, Token, TokenAccount, MintTo, InitializeMint, Transfer,
@@ -9,6 +16,10 @@ use anchor_spl::token::spl_token::state::Mint as SplMint;
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
 #[program]
+/**
+It signals to Anchor the account is an executable one, i.e. a program, and you may issue to it a cross program invocation.
+The one we have been using is the system program, though later we will use our own programs.
+ */ 
 pub mod validator_anchor_demo {
     use super::*;
 
@@ -113,7 +124,7 @@ pub struct InitProfile<'info> {
         payer = authority,
         space = UserProfile::LEN
     )]
-    pub profile: Account<'info, UserProfile>,
+    pub profile: Account<'info, UserProfile>, // The Account type will check that the owner of the account being loaded is actually owned by the program
 
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -135,10 +146,10 @@ pub struct CreateMint<'info> {
 
     /// CHECK: PDA mint authority, validated via seed constraints
     #[account(seeds = [b"mint-authority"], bump)]
-    pub mint_authority: UncheckedAccount<'info>,
+    pub mint_authority: UncheckedAccount<'info>, // UncheckedAccount is an alias for AccountInfo. This does not check for ownership, so care must be taken as it will accept arbitrary accounts.
 
     #[account(mut)]
-    pub payer: Signer<'info>,
+    pub payer: Signer<'info>, // This type will check that the Signer account signed the transaction; it checks that the signature matches the public key of the account.
     
     pub token_program: Program<'info, Token>,
     pub rent: Sysvar<'info, Rent>,
