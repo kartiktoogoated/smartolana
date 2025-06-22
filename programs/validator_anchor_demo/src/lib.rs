@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, MintTo, InitializeMint};
+use anchor_spl::token::{
+    self, Mint, Token, TokenAccount, MintTo, InitializeMint, Transfer,
+};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_lang::solana_program::program_pack::Pack;
 use anchor_spl::token::spl_token::state::Mint as SplMint;
@@ -83,7 +85,23 @@ pub mod validator_anchor_demo {
     pub fn close_validator(_ctx: Context<CloseValidator>) -> Result<()> {
         Ok(())
     }
+
+    pub fn transfer_tokens(ctx: Context<TransferTokens>, amount: u64) -> Result<()> {
+        // Manual verification that the sender owns the 'from' ATA
+        require!(
+            ctx.accounts.from.owner == ctx.accounts.sender.key(),
+            CustomError::Unauthorized
+        );
+
+        token::transfer(
+            ctx.accounts.into_transfer_context(),
+            amount,
+        )?;
+        Ok(())
+    }
 }
+
+// ----------------- CONTEXT STRUCTS ---------------------
 
 #[derive(Accounts)]
 #[instruction(name: String)]
@@ -121,7 +139,7 @@ pub struct CreateMint<'info> {
 
     #[account(mut)]
     pub payer: Signer<'info>,
-
+    
     pub token_program: Program<'info, Token>,
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
@@ -201,8 +219,8 @@ pub struct CloseValidator<'info> {
         has_one = authority,
         has_one = profile
     )]
-    pub validator: Account<'info, ValidatorInfo>,
-
+    pub validator: Account<'info, ValidatorInfo>, 
+    
     #[account(mut)]
     pub authority: Signer<'info>,
 
@@ -214,28 +232,61 @@ pub struct CloseValidator<'info> {
     pub profile: Account<'info, UserProfile>,
 }
 
+#[derive(Accounts)]
+pub struct TransferTokens<'info> {
+    #[account(mut)]
+    pub sender: Signer<'info>,
+
+    #[account(mut)]
+    pub from: Account<'info, TokenAccount>, // SENDERS ATA
+    #[account(mut)]
+    pub to: Account<'info, TokenAccount>, // RECEIVERS ATA
+
+    pub token_program: Program<'info, Token>,
+}
+
+impl<'info> TransferTokens<'info> {
+    pub fn into_transfer_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
+        let cpi_accounts = Transfer {
+            from: self.from.to_account_info(),
+            to: self.to.to_account_info(),
+            authority: self.sender.to_account_info(),
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+}
+
+// ----------------- ACCOUNT STRUCTS ---------------------
+
 #[account]
 pub struct UserProfile {
-    pub authority: Pubkey,     // 32
-    pub name: String,          // 4 (length prefix) + max characters
-    pub bump: u8,              // 1
+    pub authority: Pubkey, // 32
+    pub name: String, // 4 (length prefix) + max characters
+    pub bump: u8, // 1
 }
 
 impl UserProfile {
-    pub const LEN: usize = 8 + 32 + 4 + 32 + 1; // 8 = discriminator, 32 = Pubkey, 4 + 32 = String, 1 = bump
+    pub const LEN: usize = 8 + 32 + 4 + 32 + 1; // 8 = discriminator
 }
-
 
 #[account]
 pub struct ValidatorInfo {
-    pub id: u64,               // 8
-    pub name: String,          // 4 + 32
-    pub is_active: bool,       // 1
-    pub authority: Pubkey,     // 32
-    pub profile: Pubkey,       // 32
-    pub bump: u8,              // 1
+    pub id: u64, // 8
+    pub name: String, // 4 + 32
+    pub is_active: bool, // 1
+    pub authority: Pubkey, // 32
+    pub profile: Pubkey, // 32
+    pub bump: u8 //1
 }
 
 impl ValidatorInfo {
-    pub const LEN: usize = 8 + 8 + 4 + 32 + 1 + 32 + 32 + 1; // 8 for discriminator
+    pub const LEN: usize = 8 + 8 + 4 + 32 + 1 + 32 + 32 + 1;
+}
+
+// ----------------- ERROR ---------------------
+
+#[error_code]
+pub enum CustomError {
+    #[msg("Sender is not the owner of the provided token account")]
+    Unauthorized,
 }
