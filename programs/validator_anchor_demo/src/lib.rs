@@ -148,6 +148,31 @@ pub mod validator_anchor_demo {
 
         Ok(())
     }
+
+    pub fn create_proposal(
+        ctx: Context<CreateProposal>,
+        proposal_id: u64,
+        title: String,
+        description: String,
+        deadline: i64,
+    ) -> Result<()> {
+        let clock = Clock::get()?;
+        require!(deadline > clock.unix_timestamp, CustomError::InvalidDeadline);
+
+        let proposal = &mut ctx.accounts.proposal;
+        proposal.id = proposal_id;
+        proposal.profile = ctx.accounts.profile.key();
+        proposal.title = title;
+        proposal.description = description;
+        proposal.created_at = clock.unix_timestamp;
+        proposal.deadline = deadline;
+        proposal.yes_votes = 0;
+        proposal.no_votes = 0;
+        proposal.bump = ctx.bumps.proposal;
+
+        Ok(())
+    }
+
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -338,6 +363,33 @@ pub struct ReassignMintAuthority<'info> {
 
     pub token_program: Program<'info, Token>,
 }
+
+#[derive(Accounts)]
+#[instruction(proposal_id: u64)]
+pub struct CreateProposal<'info> {
+    #[account(
+        mut,
+        seeds = [b"profile", authority.key().as_ref()],
+        bump = profile.bump,
+        has_one = authority
+    )]
+    pub profile: Account<'info, UserProfile>,
+
+    #[account(
+        init,
+        seeds = [b"proposal", profile.key().as_ref(), &proposal_id.to_le_bytes()],
+        bump,
+        payer = authority,
+        space = Proposal::LEN
+    )]
+    pub proposal: Account<'info, Proposal>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -365,10 +417,30 @@ impl ValidatorInfo {
     pub const LEN: usize = 8 + 8 + 4 + 32 + 1 + 32 + 32 + 1;
 }
 
+#[account]
+pub struct Proposal {
+    pub id: u64,  // unique per profile
+    pub profile: Pubkey, // creator profile pda
+    pub title: String,  // 4 + N
+    pub description: String,  // 4 + M
+    pub created_at: i64,  // UNIX timestamp
+    pub deadline: i64,  // voting end
+    pub yes_votes: u64,
+    pub no_votes: u64,
+    pub bump: u8,
+}
+
+impl Proposal {
+    pub const LEN: usize = 8 + 8 + 32 + (4 + 64) + (4 + 256) + 8 + 8 + 8 + 1;
+}
+
 // ----------------- ERROR ---------------------
 
 #[error_code]
 pub enum CustomError {
     #[msg("Sender is not the owner of the provided token account")]
     Unauthorized,
+
+    #[msg("Deadline must be a future timestamp")]
+    InvalidDeadline,
 }
