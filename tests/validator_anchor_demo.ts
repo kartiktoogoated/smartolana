@@ -181,6 +181,33 @@ describe("validator_anchor_demo", () => {
     );
   });
 
+  it("Burns tokens from user's ATA", async () => {
+    const burnAmount = new anchor.BN(5_000_000_000); // Burn 5 tokens (9 decimals)
+
+    const balanceBefore = await getAccount(provider.connection, validatorAta);
+
+    await program.methods
+      .burnTokens(burnAmount)
+      .accountsStrict({
+        owner: user,
+        ownerAta: validatorAta,
+        mint: mintPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+
+    const balanceAfter = await getAccount(provider.connection, validatorAta);
+
+    console.log("🔥 Burned tokens!");
+    console.log("💰 Balance before:", Number(balanceBefore.amount));
+    console.log("💸 Balance after :", Number(balanceAfter.amount));
+
+    assert.strictEqual(
+      Number(balanceBefore.amount) - burnAmount.toNumber(),
+      Number(balanceAfter.amount)
+    );
+  });
+
   it("Updates PDA validator info", async () => {
     await program.methods
       .updateValidator("UpdatedValidator", false)
