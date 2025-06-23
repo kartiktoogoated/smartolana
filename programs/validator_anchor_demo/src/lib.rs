@@ -1,17 +1,17 @@
 /**
- * THE OVERALL FLOW 
+ * THE OVERALL FLOW
  * program logic,
  * context structs,
  * account structs
  */
-
 use anchor_lang::prelude::*;
-use anchor_spl::token::{
-    self, Mint, Burn, Token, TokenAccount, MintTo, InitializeMint, Transfer,
-};
-use anchor_spl::associated_token::AssociatedToken;
 use anchor_lang::solana_program::program_pack::Pack;
+use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::state::Mint as SplMint;
+use anchor_spl::token::{
+    self, set_authority, spl_token, Burn, InitializeMint, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer
+};
+use spl_token::instruction::AuthorityType;
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
@@ -19,7 +19,7 @@ declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 /**
 It signals to Anchor the account is an executable one, i.e. a program, and you may issue to it a cross program invocation.
 The one we have been using is the system program, though later we will use our own programs.
- */ 
+ */
 pub mod validator_anchor_demo {
     use super::*;
 
@@ -86,7 +86,11 @@ pub mod validator_anchor_demo {
         Ok(())
     }
 
-    pub fn update_validator(ctx: Context<UpdateValidator>, new_name: String, is_active: bool) -> Result<()> {
+    pub fn update_validator(
+        ctx: Context<UpdateValidator>,
+        new_name: String,
+        is_active: bool,
+    ) -> Result<()> {
         let validator = &mut ctx.accounts.validator;
         validator.name = new_name;
         validator.is_active = is_active;
@@ -104,10 +108,7 @@ pub mod validator_anchor_demo {
             CustomError::Unauthorized
         );
 
-        token::transfer(
-            ctx.accounts.into_transfer_context(),
-            amount,
-        )?;
+        token::transfer(ctx.accounts.into_transfer_context(), amount)?;
         Ok(())
     }
 
@@ -122,6 +123,29 @@ pub mod validator_anchor_demo {
         );
 
         token::burn(cpi_ctx, amount)?;
+        Ok(())
+    }
+
+    pub fn reassign_mint_authority(
+        ctx: Context<ReassignMintAuthority>,
+        new_authority: Pubkey,
+    ) -> Result<()> {
+        let bump = ctx.bumps.mint_authority;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"mint-authority", &[bump]]];
+
+        set_authority(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                SetAuthority {
+                    current_authority: ctx.accounts.mint_authority.to_account_info(),
+                    account_or_mint: ctx.accounts.mint.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            AuthorityType::MintTokens,
+            Some(new_authority),
+        )?;
+
         Ok(())
     }
 }
@@ -164,7 +188,7 @@ pub struct CreateMint<'info> {
 
     #[account(mut)]
     pub payer: Signer<'info>, // This type will check that the Signer account signed the transaction; it checks that the signature matches the public key of the account.
-    
+
     pub token_program: Program<'info, Token>,
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
@@ -244,8 +268,8 @@ pub struct CloseValidator<'info> {
         has_one = authority,
         has_one = profile
     )]
-    pub validator: Account<'info, ValidatorInfo>, 
-    
+    pub validator: Account<'info, ValidatorInfo>,
+
     #[account(mut)]
     pub authority: Signer<'info>,
 
@@ -299,13 +323,28 @@ pub struct BurnTokens<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+pub struct ReassignMintAuthority<'info> {
+    #[account(
+        mut,
+        seeds = [b"global-mint"],
+        bump
+    )]
+    pub mint: Account<'info, Mint>,
+
+    /// CHECK: PDA mint authority (not enforced here, signer seeds used instead)
+    #[account(seeds = [b"mint-authority"], bump)]
+    pub mint_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
 pub struct UserProfile {
     pub authority: Pubkey, // 32
-    pub name: String, // 4 (length prefix) + max characters
-    pub bump: u8, // 1
+    pub name: String,      // 4 (length prefix) + max characters
+    pub bump: u8,          // 1
 }
 
 impl UserProfile {
@@ -314,12 +353,12 @@ impl UserProfile {
 
 #[account]
 pub struct ValidatorInfo {
-    pub id: u64, // 8
-    pub name: String, // 4 + 32
-    pub is_active: bool, // 1
+    pub id: u64,           // 8
+    pub name: String,      // 4 + 32
+    pub is_active: bool,   // 1
     pub authority: Pubkey, // 32
-    pub profile: Pubkey, // 32
-    pub bump: u8 //1
+    pub profile: Pubkey,   // 32
+    pub bump: u8,          //1
 }
 
 impl ValidatorInfo {

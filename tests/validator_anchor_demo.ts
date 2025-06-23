@@ -14,7 +14,8 @@ describe("validator_anchor_demo", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.ValidatorAnchorDemo as Program<ValidatorAnchorDemo>;
+  const program = anchor.workspace
+    .ValidatorAnchorDemo as Program<ValidatorAnchorDemo>;
 
   const id = 42;
   const idBytes = new anchor.BN(id).toArrayLike(Buffer, "le", 8);
@@ -22,25 +23,28 @@ describe("validator_anchor_demo", () => {
   const user = provider.wallet.publicKey;
 
   // PDA Definitions
-  const [profilePda, profileBump] = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from("profile"), user.toBuffer()],
-    program.programId
-  );
+  const [profilePda, profileBump] =
+    anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("profile"), user.toBuffer()],
+      program.programId
+    );
 
-  const [validatorPda, validatorBump] = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from("validator"), user.toBuffer(), idBytes],
-    program.programId
-  );
+  const [validatorPda, validatorBump] =
+    anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("validator"), user.toBuffer(), idBytes],
+      program.programId
+    );
 
   const [mintPda, mintBump] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("global-mint")],
     program.programId
   );
 
-  const [mintAuthPda, mintAuthBump] = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from("mint-authority")],
-    program.programId
-  );
+  const [mintAuthPda, mintAuthBump] =
+    anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("mint-authority")],
+      program.programId
+    );
 
   const validatorAta = getAssociatedTokenAddressSync(mintPda, user);
 
@@ -62,7 +66,7 @@ describe("validator_anchor_demo", () => {
 
   it("Initializes a PDA profile for the user", async () => {
     console.log("🛠 Creating Profile PDA at:", profilePda.toBase58());
-  
+
     await program.methods
       .initProfile("Kartik")
       .accountsStrict({
@@ -71,26 +75,26 @@ describe("validator_anchor_demo", () => {
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
-  
+
     const profileAccount = await program.account.userProfile.fetch(profilePda);
-  
+
     console.log("✅ Profile Created:");
     console.log("• Address   :", profilePda.toBase58());
     console.log("• Authority :", profileAccount.authority.toBase58());
     console.log("• Name      :", profileAccount.name);
     console.log("• Bump      :", profileAccount.bump);
-  
+
     assert.strictEqual(profileAccount.name, "Kartik");
     assert.strictEqual(profileAccount.authority.toBase58(), user.toBase58());
     assert.strictEqual(profileAccount.bump, profileBump);
   });
-  
+
   it("Initializes a PDA validator and mints tokens to ATA", async () => {
     console.log("🛠 Creating Validator PDA at:", validatorPda.toBase58());
     console.log("🛠 Using Mint PDA:", mintPda.toBase58());
     console.log("🛠 Mint Auth PDA:", mintAuthPda.toBase58());
     console.log("🛠 Validator ATA:", validatorAta.toBase58());
-  
+
     await program.methods
       .initValidator(new anchor.BN(id), "KartikValidator")
       .accountsStrict({
@@ -106,9 +110,9 @@ describe("validator_anchor_demo", () => {
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-  
+
     const account = await program.account.validatorInfo.fetch(validatorPda);
-  
+
     console.log("✅ Validator Created:");
     console.log("• Pubkey    :", validatorPda.toBase58());
     console.log("• ID        :", account.id.toNumber());
@@ -117,7 +121,7 @@ describe("validator_anchor_demo", () => {
     console.log("• Authority :", account.authority.toBase58());
     console.log("• Profile   :", account.profile.toBase58());
     console.log("• Bump      :", account.bump);
-  
+
     assert.strictEqual(account.id.toNumber(), id);
     assert.strictEqual(account.name, "KartikValidator");
     assert.strictEqual(account.isActive, true);
@@ -125,13 +129,19 @@ describe("validator_anchor_demo", () => {
     assert.strictEqual(account.profile.toBase58(), profilePda.toBase58());
     assert.strictEqual(account.bump, validatorBump);
   });
-  
+
   it("Transfers tokens to another user", async () => {
     const recipient = anchor.web3.Keypair.generate();
-    const recipientAta = getAssociatedTokenAddressSync(mintPda, recipient.publicKey);
+    const recipientAta = getAssociatedTokenAddressSync(
+      mintPda,
+      recipient.publicKey
+    );
 
     // Airdrop lamports to recipient so it can create ATA
-    await provider.connection.requestAirdrop(recipient.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL);
+    await provider.connection.requestAirdrop(
+      recipient.publicKey,
+      2 * anchor.web3.LAMPORTS_PER_SOL
+    );
     await new Promise((r) => setTimeout(r, 2000)); // Wait for airdrop finality
 
     if (!provider.wallet || !provider.wallet.payer) {
@@ -148,10 +158,22 @@ describe("validator_anchor_demo", () => {
 
     console.log("🎯 Created ATA for recipient:", recipientAta.toBase58());
 
-    const senderBalanceBefore = await getAccount(provider.connection, validatorAta);
-    const recipientBalanceBefore = await getAccount(provider.connection, recipientAta);
-    console.log("💰 Sender balance before:", Number(senderBalanceBefore.amount));
-    console.log("💰 Recipient balance before:", Number(recipientBalanceBefore.amount));
+    const senderBalanceBefore = await getAccount(
+      provider.connection,
+      validatorAta
+    );
+    const recipientBalanceBefore = await getAccount(
+      provider.connection,
+      recipientAta
+    );
+    console.log(
+      "💰 Sender balance before:",
+      Number(senderBalanceBefore.amount)
+    );
+    console.log(
+      "💰 Recipient balance before:",
+      Number(recipientBalanceBefore.amount)
+    );
 
     // Transfer 10 tokens (10_000_000_000 with 9 decimals)
     await program.methods
@@ -164,11 +186,20 @@ describe("validator_anchor_demo", () => {
       })
       .rpc();
 
-    const senderBalanceAfter = await getAccount(provider.connection, validatorAta);
-    const recipientBalanceAfter = await getAccount(provider.connection, recipientAta);
+    const senderBalanceAfter = await getAccount(
+      provider.connection,
+      validatorAta
+    );
+    const recipientBalanceAfter = await getAccount(
+      provider.connection,
+      recipientAta
+    );
     console.log("✅ Token transfer complete!");
     console.log("💸 Sender balance after:", Number(senderBalanceAfter.amount));
-    console.log("🎉 Recipient balance after:", Number(recipientBalanceAfter.amount));
+    console.log(
+      "🎉 Recipient balance after:",
+      Number(recipientBalanceAfter.amount)
+    );
 
     assert.strictEqual(
       Number(senderBalanceBefore.amount) - 10_000_000_000,
@@ -206,6 +237,48 @@ describe("validator_anchor_demo", () => {
       Number(balanceBefore.amount) - burnAmount.toNumber(),
       Number(balanceAfter.amount)
     );
+  });
+
+  it("Reassigns the mint authority", async () => {
+    const newAuthority = anchor.web3.Keypair.generate();
+
+    // Airdrop some SOL to the new authority (for future txns if needed)
+    await provider.connection.requestAirdrop(
+      newAuthority.publicKey,
+      2 * anchor.web3.LAMPORTS_PER_SOL
+    );
+    await new Promise((r) => setTimeout(r, 2000)); // wait for finality
+
+    // Call the reassign_mint_authority instruction
+    await program.methods
+      .reassignMintAuthority(newAuthority.publicKey)
+      .accountsStrict({
+        mint: mintPda,
+        mintAuthority: mintAuthPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+
+    // Get the parsed account info for the mint
+    const mintInfo = await provider.connection.getParsedAccountInfo(mintPda);
+
+    if (!mintInfo.value) throw new Error("Mint account not found");
+
+    // Check if data is parsed (not raw Buffer)
+    if ("parsed" in mintInfo.value.data) {
+      const parsed = mintInfo.value.data.parsed;
+
+      const actualAuthority = parsed?.info?.mintAuthority;
+      console.log(
+        "🔁 Reassigned Mint Authority to:",
+        newAuthority.publicKey.toBase58()
+      );
+      console.log("🧾 On-chain Mint Authority     :", actualAuthority);
+
+      expect(actualAuthority).to.equal(newAuthority.publicKey.toBase58());
+    } else {
+      throw new Error("Account data is not parsed");
+    }
   });
 
   it("Updates PDA validator info", async () => {
