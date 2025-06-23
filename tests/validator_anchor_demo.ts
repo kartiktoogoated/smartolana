@@ -61,6 +61,8 @@ describe("validator_anchor_demo", () => {
   });
 
   it("Initializes a PDA profile for the user", async () => {
+    console.log("🛠 Creating Profile PDA at:", profilePda.toBase58());
+  
     await program.methods
       .initProfile("Kartik")
       .accountsStrict({
@@ -69,29 +71,33 @@ describe("validator_anchor_demo", () => {
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
-
+  
     const profileAccount = await program.account.userProfile.fetch(profilePda);
-
-    console.log("✅ PDA Profile created:", {
-      address: profilePda.toBase58(),
-      authority: profileAccount.authority.toBase58(),
-      name: profileAccount.name,
-      bump: profileAccount.bump,
-    });
-
+  
+    console.log("✅ Profile Created:");
+    console.log("• Address   :", profilePda.toBase58());
+    console.log("• Authority :", profileAccount.authority.toBase58());
+    console.log("• Name      :", profileAccount.name);
+    console.log("• Bump      :", profileAccount.bump);
+  
     assert.strictEqual(profileAccount.name, "Kartik");
     assert.strictEqual(profileAccount.authority.toBase58(), user.toBase58());
     assert.strictEqual(profileAccount.bump, profileBump);
   });
-
+  
   it("Initializes a PDA validator and mints tokens to ATA", async () => {
+    console.log("🛠 Creating Validator PDA at:", validatorPda.toBase58());
+    console.log("🛠 Using Mint PDA:", mintPda.toBase58());
+    console.log("🛠 Mint Auth PDA:", mintAuthPda.toBase58());
+    console.log("🛠 Validator ATA:", validatorAta.toBase58());
+  
     await program.methods
       .initValidator(new anchor.BN(id), "KartikValidator")
       .accountsStrict({
         validator: validatorPda,
         authority: user,
         profile: profilePda,
-        validatorAta: validatorAta, // ✅ fixed here
+        validatorAta: validatorAta,
         mint: mintPda,
         mintAuthority: mintAuthPda,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -100,19 +106,18 @@ describe("validator_anchor_demo", () => {
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-
+  
     const account = await program.account.validatorInfo.fetch(validatorPda);
-
-    console.log("✅ Validator PDA created:", {
-      pubkey: validatorPda.toBase58(),
-      id: account.id.toNumber(),
-      name: account.name,
-      isActive: account.isActive,
-      authority: account.authority.toBase58(),
-      profile: account.profile.toBase58(),
-      bump: account.bump,
-    });
-
+  
+    console.log("✅ Validator Created:");
+    console.log("• Pubkey    :", validatorPda.toBase58());
+    console.log("• ID        :", account.id.toNumber());
+    console.log("• Name      :", account.name);
+    console.log("• Active?   :", account.isActive);
+    console.log("• Authority :", account.authority.toBase58());
+    console.log("• Profile   :", account.profile.toBase58());
+    console.log("• Bump      :", account.bump);
+  
     assert.strictEqual(account.id.toNumber(), id);
     assert.strictEqual(account.name, "KartikValidator");
     assert.strictEqual(account.isActive, true);
@@ -120,7 +125,7 @@ describe("validator_anchor_demo", () => {
     assert.strictEqual(account.profile.toBase58(), profilePda.toBase58());
     assert.strictEqual(account.bump, validatorBump);
   });
-
+  
   it("Transfers tokens to another user", async () => {
     const recipient = anchor.web3.Keypair.generate();
     const recipientAta = getAssociatedTokenAddressSync(mintPda, recipient.publicKey);
