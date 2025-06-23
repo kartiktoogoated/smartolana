@@ -35,7 +35,7 @@ pub struct ReassignMintAuthority<'info> {
         seeds = [b"mint-authority"],
         bump
     )]
-    pub mint_authority: UncheckedAccount<'info, Mint>,
+    pub mint_authority: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
 }
