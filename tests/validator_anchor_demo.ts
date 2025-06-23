@@ -327,4 +327,54 @@ describe("validator_anchor_demo", () => {
       expect(err.message).to.include("Account does not exist");
     }
   });
+
+  it("Creates a proposal using PDA", async () => {
+    const proposalId = new anchor.BN(1);
+    const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+
+    const [proposalPda, proposalBump] =
+    anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("proposal"),
+        profilePda.toBuffer(),
+        proposalId.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );  
+
+    console.log("📝 Proposal PDA:", proposalPda.toBase58());
+
+    await program.methods
+      .createProposal(
+        new anchor.BN(proposalId), // proposal_id
+        "Decentralize Mint Access", // title
+        "Proposal to allow multiple mint signers", // description
+        new anchor.BN(deadline)
+      )
+      .accountsStrict({
+        profile: profilePda,
+        proposal: proposalPda,
+        authority: user,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const proposalAccount = await program.account.proposal.fetch(proposalPda);
+
+    console.log("✅ Proposal Created:");
+    console.log("• Title       :", proposalAccount.title);
+    console.log("• Description :", proposalAccount.description);
+    console.log("• Created At  :", proposalAccount.createdAt.toString());
+    console.log("• Deadline    :", proposalAccount.deadline.toString());
+
+    assert.strictEqual(proposalAccount.title, "Decentralize Mint Access");
+    assert.strictEqual(
+      proposalAccount.description,
+      "Proposal to allow multiple mint signers"
+    );
+    assert.strictEqual(proposalAccount.profile.toBase58(), profilePda.toBase58());
+    assert.strictEqual(proposalAccount.bump, proposalBump);
+    assert.strictEqual(proposalAccount.id.toNumber(), Number(proposalId));
+  });
+
 });
