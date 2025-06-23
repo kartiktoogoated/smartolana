@@ -1,27 +1,94 @@
-# smartolana
+Validator Anchor Token Demo -- Solana PDA + Token Minting
+========================================================
 
-🧱 **Solana Token Workflow (PDA Based) – Anchor + SPL Token**
--------------------------------------------------------------
+This project demonstrates how to build a PDA-based token minting and validator management system using Anchor and the SPL Token program.
 
-### 🔄 Overview
+* * * * *
 
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   textCopyEditUser (Signer)     |     ├──▶ [Create Profile PDA] ----------------------------▶ profile_pda     |     ├──▶ [Create Mint] (PDA-based Mint & Authority)     |       |     |       ├──▶ mint_pda (global-mint)     |       └──▶ mint_auth_pda (mint-authority)     |     ├──▶ [Create Validator PDA & ATA] --------------------▶ validator_pda     |       |     |       └──▶ Mints tokens to validator_ata via CPI     |     ├──▶ [Transfer Tokens] to other user ----------------▶ recipient_ata     |     ├──▶ [Burn Tokens] from own ATA     |     └──▶ [Reassign Mint Authority] → new pubkey   `
+📌 **Features**
+---------------
 
-### 🗂 **Account & PDA Breakdown**
+-   ✅ PDA-based Profile creation
 
-AccountPDA?Seeds UsedDescriptionUserProfile✅\["profile", user\_pubkey\]User’s on-chain profileValidatorInfo✅\["validator", user\_pubkey, id\_bytes\]Per-validator metadataMint✅\["global-mint"\]The SPL token mintMint Authority✅\["mint-authority"\]PDA signer that can mint tokensAssociated Token❌Deterministic via getAssociatedTokenAddressHolds user's token balance
+-   ✅ PDA-based global token mint and mint-authority
 
-### 🧾 **Signer Rules Recap**
+-   ✅ Validator account creation + token allocation
 
-ActionSignerWhy?initProfileuserCreates profile for signercreateMintpayerPays for mint accountinitValidatoruserCreator of validator, also ATAmintTo (CPI)mint\_authority (PDA)Signed via seedstransferTokensuser (as sender)Owner of the from ATAburnTokensuserBurns from their own ATAsetAuthority (CPI)mint\_authority (PDA)Signed with seeds again
+-   ✅ Secure token transfers between users
 
-### 🔁 **Authority Types**
+-   ✅ Token burning from user ATAs
 
-*   MintTokens: Who can mint new tokens.
-    
-*   FreezeAccount: Who can freeze any ATA.
-    
-*   AccountOwner: Ownership of a specific ATA.
-    
+-   ✅ Mint authority re-assignment (DAO-style logic)
 
-Used set\_authority with AuthorityType::MintTokens.
+-   ✅ Fully tested with Anchor + Mocha
+
+* * * * *
+
+🯡 **Program Architecture**
+---------------------------
+
+```
+User (Signer)
+   ├─▶ init_profile       → Creates profile_pda
+   ├─▶ create_mint        → Sets up mint_pda and mint_auth_pda (PDA-based)
+   ├─▶ init_validator     → Creates validator_pda and mints tokens to ATA
+   ├─▶ transfer_tokens    → Sends tokens to another user's ATA
+   ├─▶ burn_tokens        → Burns tokens from own ATA
+   └─▶ reassign_mint_auth → Moves authority to new pubkey (e.g. DAO)
+```
+
+* * * * *
+
+🗂 **Accounts Overview**
+------------------------
+
+| Account | PDA | Seeds Used | Description |
+| `UserProfile` | ✅ | `["profile", user_pubkey]` | Stores user's profile name + authority |
+| `ValidatorInfo` | ✅ | `["validator", user_pubkey, id_bytes]` | Validator metadata |
+| `Mint` | ✅ | `["global-mint"]` | Token mint account |
+| `Mint Authority` | ✅ | `["mint-authority"]` | PDA that signs mint/burn/reassign calls |
+| `TokenAccount` | ❌ | Auto-generated ATA | Holds token balances per user |
+
+* * * * *
+
+📓 **Program Instructions**
+---------------------------
+
+### `init_profile(name: String)`
+
+Creates a PDA-based profile.
+
+### `create_mint()`
+
+Initializes a new mint using PDA mint authority.
+
+### `init_validator(id: u64, name: String)`
+
+Creates validator PDA, allocates tokens to user ATA via PDA mint authority.
+
+### `transfer_tokens(amount: u64)`
+
+Transfers tokens between token accounts. Requires sender signature.
+
+### `burn_tokens(amount: u64)`
+
+Burns tokens from user's token account.
+
+### `reassign_mint_authority(new_authority: Pubkey)`
+
+Reassigns minting power to a new authority, e.g., a DAO-controlled wallet.
+
+* * * * *
+
+🖋️ **Testing Strategy**
+------------------------
+
+All features are tested with:
+
+-   Mocha + Chai
+
+-   Anchor test framework
+
+-   Manual ATA creation + airdrop logic
+
+-   PDA creation and validation
