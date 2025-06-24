@@ -303,44 +303,19 @@ describe("validator_anchor_demo", () => {
     assert.strictEqual(updated.isActive, false);
   });
 
-  it("Closes PDA validator account", async () => {
-    const preBalance = await provider.connection.getBalance(user);
-
-    await program.methods
-      .closeValidator()
-      .accountsStrict({
-        validator: validatorPda,
-        authority: user,
-        profile: profilePda,
-      })
-      .rpc();
-
-    const postBalance = await provider.connection.getBalance(user);
-    const lamportsRef = postBalance - preBalance;
-
-    console.log("✅ Validator account closed. Lamports refunded:", lamportsRef);
-
-    try {
-      await program.account.validatorInfo.fetch(validatorPda);
-      assert.fail("Validator account still exists after closure!");
-    } catch (err: any) {
-      expect(err.message).to.include("Account does not exist");
-    }
-  });
-
   it("Creates a proposal using PDA", async () => {
     const proposalId = new anchor.BN(1);
     const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
 
     const [proposalPda, proposalBump] =
-    anchor.web3.PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("proposal"),
-        profilePda.toBuffer(),
-        proposalId.toArrayLike(Buffer, "le", 8),
-      ],
-      program.programId
-    );  
+      anchor.web3.PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("proposal"),
+          profilePda.toBuffer(),
+          proposalId.toArrayLike(Buffer, "le", 8),
+        ],
+        program.programId
+      );
 
     console.log("📝 Proposal PDA:", proposalPda.toBase58());
 
@@ -372,9 +347,214 @@ describe("validator_anchor_demo", () => {
       proposalAccount.description,
       "Proposal to allow multiple mint signers"
     );
-    assert.strictEqual(proposalAccount.profile.toBase58(), profilePda.toBase58());
+    assert.strictEqual(
+      proposalAccount.profile.toBase58(),
+      profilePda.toBase58()
+    );
     assert.strictEqual(proposalAccount.bump, proposalBump);
     assert.strictEqual(proposalAccount.id.toNumber(), Number(proposalId));
   });
 
+  it("Allows a valid vote from validator", async () => {
+    const proposalId = new anchor.BN(2);
+    const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour later
+
+    const [proposalPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("proposal"),
+        profilePda.toBuffer(),
+        proposalId.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
+
+    const [votePda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vote"), proposalPda.toBuffer(), validatorPda.toBuffer()],
+      program.programId
+    );
+
+    // Create a new proposal
+    await program.methods
+      .createProposal(
+        proposalId,
+        "Enable Logging",
+        "Add validator event logging",
+        new anchor.BN(deadline)
+      )
+      .accountsStrict({
+        profile: profilePda,
+        proposal: proposalPda,
+        authority: user,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Vote on it
+    await program.methods
+      .voteOnProposal(true)
+      .accountsStrict({
+        authority: user,
+        profile: profilePda,
+        validator: validatorPda,
+        proposal: proposalPda,
+        voteRecord: votePda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const voteAccount = await program.account.voteRecord.fetch(votePda);
+
+    console.log("🗳 Vote Cast:", {
+      vote: voteAccount.vote,
+      timestamp: voteAccount.timestamp.toString(),
+    });
+
+    assert.strictEqual(voteAccount.vote, true);
+    assert.strictEqual(
+      voteAccount.validator.toBase58(),
+      validatorPda.toBase58()
+    );
+    assert.strictEqual(voteAccount.proposal.toBase58(), proposalPda.toBase58());
+  });
+
+  it("Rejects duplicate vote from same validator", async () => {
+    const proposalId = new anchor.BN(3);
+    const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+    const [proposalPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("proposal"),
+        profilePda.toBuffer(),
+        proposalId.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
+
+    const [votePda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vote"), proposalPda.toBuffer(), validatorPda.toBuffer()],
+      program.programId
+    );
+
+    await program.methods
+      .createProposal(
+        proposalId,
+        "Add Alerting",
+        "Notify on critical state",
+        new anchor.BN(deadline)
+      )
+      .accountsStrict({
+        profile: profilePda,
+        proposal: proposalPda,
+        authority: user,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    await program.methods
+      .voteOnProposal(false)
+      .accountsStrict({
+        authority: user,
+        profile: profilePda,
+        validator: validatorPda,
+        proposal: proposalPda,
+        voteRecord: votePda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    try {
+      await program.methods
+        .voteOnProposal(true)
+        .accountsStrict({
+          authority: user,
+          profile: profilePda,
+          validator: validatorPda,
+          proposal: proposalPda,
+          voteRecord: votePda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should not allow double voting");
+    } catch (err: any) {
+      console.log("✅ Rejected duplicate vote:", err.message);
+      expect(err.message).to.include("already in use");
+    }
+  });
+
+  it("Rejects vote on expired proposal", async () => {
+    const proposalId = new anchor.BN(999);
+    const deadline = Math.floor(Date.now() / 1000) + 2; // 2 seconds from now
+  
+    const [proposalPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("proposal"),
+        profilePda.toBuffer(),
+        proposalId.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
+  
+    const [votePda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vote"), proposalPda.toBuffer(), validatorPda.toBuffer()],
+      program.programId
+    );
+  
+    // Create the proposal with a valid short deadline
+    await program.methods
+      .createProposal(proposalId, "Short-lived Proposal", "Expires fast", new anchor.BN(deadline))
+      .accountsStrict({
+        profile: profilePda,
+        proposal: proposalPda,
+        authority: user,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+  
+    // Wait for the deadline to expire
+    await new Promise((res) => setTimeout(res, 3000));
+  
+    // Now try voting — should fail due to deadline
+    try {
+      await program.methods
+        .voteOnProposal(true)
+        .accountsStrict({
+          authority: user,
+          profile: profilePda,
+          validator: validatorPda,
+          proposal: proposalPda,
+          voteRecord: votePda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Vote on expired proposal should have failed");
+    } catch (err: any) {
+      console.log("✅ Rejected expired vote:", err.message);
+      expect(err.message).to.include("ProposalExpired");
+    }
+  });  
+
+  it("Closes PDA validator account", async () => {
+    const preBalance = await provider.connection.getBalance(user);
+
+    await program.methods
+      .closeValidator()
+      .accountsStrict({
+        validator: validatorPda,
+        authority: user,
+        profile: profilePda,
+      })
+      .rpc();
+
+    const postBalance = await provider.connection.getBalance(user);
+    const lamportsRef = postBalance - preBalance;
+
+    console.log("✅ Validator account closed. Lamports refunded:", lamportsRef);
+
+    try {
+      await program.account.validatorInfo.fetch(validatorPda);
+      assert.fail("Validator account still exists after closure!");
+    } catch (err: any) {
+      expect(err.message).to.include("Account does not exist");
+    }
+  });
 });
