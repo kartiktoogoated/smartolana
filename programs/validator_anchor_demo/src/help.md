@@ -65,3 +65,10 @@ ts
 Copy
 Edit
 program.methods.initProfile("Kartik").accounts({ ... })
+
+| Account Type    | Seed Format                                        | Why?                                                                                                                |
+| --------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `UserProfile`   | `["profile", authority]`                           | Each user only has one profile — use `authority` pubkey as unique ID                                                |
+| `ValidatorInfo` | `["validator", authority, id.to_le_bytes()]`       | A user can create multiple validators — add `id` to make each one unique                                            |
+| `Proposal`      | `["proposal", profile, proposal_id.to_le_bytes()]` | One profile can make many proposals — so need `proposal_id`                                                         |
+| `VoteRecord`    | `["vote", proposal, validator]`                    | A validator can vote on many proposals, and each proposal gets many votes — pair them both to make each vote unique |
