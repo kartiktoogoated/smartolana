@@ -1,9 +1,9 @@
 // import * as anchor from "@coral-xyz/anchor";
 // import { Program } from "@coral-xyz/anchor";
-// import { ValidatorAnchorDemo } from "../target/types/validator_anchor_demo";
+// import { ValidatorAnchorDemo } from "../target/types/smartolana";
 // import { assert, expect } from "chai";
 
-// describe("validator_anchor_demo", () => {
+// describe("smartolana", () => {
 //   const provider = anchor.AnchorProvider.env();
 //   anchor.setProvider(provider);
 

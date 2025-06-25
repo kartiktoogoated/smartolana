@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
 #[program] //#[program] tells Anchor: “This is the entry point for external calls (instructions)”
-pub mod validator_anchor_demo {
+pub mod smartolana {
     use super::*;
 
     pub fn create_validator(ctx: Context<CreateValidator>, id: u64, name: String) -> Result<()> {
@@ -75,7 +75,7 @@ use anchor_lang::prelude::*;
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
 #[program] //#[program] tells Anchor: “This is the entry point for external calls (instructions)”
-pub mod validator_anchor_demo {
+pub mod smartolana {
     use super::*;
 
     // Create new validator account with id and name

@@ -1,9 +1,11 @@
+#![allow(unexpected_cfgs)]
 /**
  * THE OVERALL FLOW
  * program logic,
  * context structs,
  * account structs
  */
+
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program_pack::Pack;
 use anchor_spl::associated_token::AssociatedToken;
@@ -15,12 +17,14 @@ use spl_token::instruction::AuthorityType;
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
+const LOCK_PERIOD_SECONDS: i64 = 3600;
+
 #[program]
 /**
 It signals to Anchor the account is an executable one, i.e. a program, and you may issue to it a cross program invocation.
 The one we have been using is the system program, though later we will use our own programs.
  */
-pub mod validator_anchor_demo {
+pub mod smartolana {
     use super::*;
 
     pub fn init_profile(ctx: Context<InitProfile>, name: String) -> Result<()> {

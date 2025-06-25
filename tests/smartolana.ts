@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { ValidatorAnchorDemo } from "../target/types/validator_anchor_demo";
+import { Smartolana } from "../target/types/smartolana";
 import { assert, expect } from "chai";
 import {
   TOKEN_PROGRAM_ID,
@@ -10,12 +10,12 @@ import {
   getAccount,
 } from "@solana/spl-token";
 
-describe("validator_anchor_demo", () => {
+describe("smartolana", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
   const program = anchor.workspace
-    .ValidatorAnchorDemo as Program<ValidatorAnchorDemo>;
+    .Smartolana as Program<Smartolana>;
 
   const id = 42;
   const idBytes = new anchor.BN(id).toArrayLike(Buffer, "le", 8);

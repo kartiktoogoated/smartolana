@@ -3,10 +3,10 @@ use anchor_lang::prelude::*;
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
 #[program]
-pub mod validator_anchor_demo {
+pub mod smartolana {
     use super::*;
 
-    // Create a PDA-based user profile
+    // Initialize profile PDA for a user
     pub fn init_profile(ctx: Context<InitProfile>, name: String) -> Result<()> {
         let profile = &mut ctx.accounts.profile;
         profile.authority = ctx.accounts.authority.key();
@@ -14,8 +14,8 @@ pub mod validator_anchor_demo {
         profile.bump = ctx.bumps.profile;
         Ok(())
     }
-
-    // Create a PDA-based validator linked to the user profile
+    
+    // Create a validator PDA with unique ID under a profile
     pub fn init_validator(ctx: Context<InitValidator>, id: u64, name: String) -> Result<()> {
         let validator = &mut ctx.accounts.validator;
         validator.id = id;
@@ -27,7 +27,7 @@ pub mod validator_anchor_demo {
         Ok(())
     }
 
-    // Update validator details if authority and profile match
+    // Update validator details
     pub fn update_validator(ctx: Context<UpdateValidator>, new_name: String, is_active: bool) -> Result<()> {
         let validator = &mut ctx.accounts.validator;
         validator.name = new_name;
@@ -35,22 +35,20 @@ pub mod validator_anchor_demo {
         Ok(())
     }
 
-    // Close validator and refund lamports to authority
+    // Close validator and refund rent
     pub fn close_validator(ctx: Context<CloseValidator>) -> Result<()> {
         Ok(())
     }
 }
 
-
-// Account Structs
-// PDA INITIALIZER: User Profile
+// Accounts Context
 
 #[derive(Accounts)]
 #[instruction(name: String)]
 pub struct InitProfile<'info> {
     #[account(
         init,
-        seeds = [b"profile", authority.key().as_ref()],
+        seeds =[b"profile", authority.key().as_ref()],
         bump,
         payer = authority,
         space = 8 + 32 + 4 + 32 + 1
@@ -70,18 +68,16 @@ pub struct UserProfile {
     pub bump: u8,
 }
 
-// PDA INITIALIZER: Validator
-
 #[derive(Accounts)]
 #[instruction(id: u64, name: String)]
 pub struct InitValidator<'info> {
     #[account(
         init,
-        seeds =[b"validator", authority.key().as_ref()],
+        seeds = [b"validator", authority.key().as_ref(), &id.to_le_bytes()],
         bump,
         payer = authority,
         space = 8 + 8 + 4 + 32 + 1 + 32 + 32 + 1
-        // discriminator + id + name string + bool + authority pubkey + profile pubkey + bump
+        // discriminator + id + name + bool + authority + profile + bump
     )]
     pub validator: Account<'info, ValidatorInfo>,
 
@@ -102,19 +98,19 @@ pub struct InitValidator<'info> {
 pub struct UpdateValidator<'info> {
     #[account(
         mut,
-        seeds = [b"validator", authority.key().as_ref()],
+        seeds = [b"validator", authority.key().as_ref(), &validator.id.to_le_bytes()],
         bump = validator.bump,
         has_one = authority,
         has_one = profile,
     )]
     pub validator: Account<'info, ValidatorInfo>,
-    
+
     pub authority: Signer<'info>,
 
     #[account(
         seeds = [b"profile", authority.key().as_ref()],
         bump = profile.bump,
-        has_one = authority
+        has_one = authority,
     )]
     pub profile: Account<'info, UserProfile>,
 }
@@ -124,10 +120,10 @@ pub struct CloseValidator<'info> {
     #[account(
         mut,
         close = authority,
-        seeds = [b"validator", authority.key().as_ref()],
+        seeds = [b"validator", authority.key().as_ref(), &validator.id.to_le_bytes()],
         bump = validator.bump,
         has_one = authority,
-        has_one = profile,
+        has_one = profile
     )]
     pub validator: Account<'info, ValidatorInfo>,
 

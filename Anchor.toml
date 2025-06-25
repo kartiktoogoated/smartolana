@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-validator_anchor_demo = "BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz"
+smartolana = "BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz"
 
 # [programs.devnet]
-# validator_anchor_demo = "8QTQ4fmEJx9mGM6kreMvbnf8Y4DuSHWTCvaSTn5fFznS"
+# smartolana = "8QTQ4fmEJx9mGM6kreMvbnf8Y4DuSHWTCvaSTn5fFznS"
 
 [registry]
 url = "https://api.apr.dev"

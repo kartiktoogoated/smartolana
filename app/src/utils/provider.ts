@@ -1,7 +1,7 @@
 import { AnchorProvider, Program, setProvider } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
-import idl from "../../../target/idl/validator_anchor_demo.json";
-import type { ValidatorAnchorDemo } from "../../../target/types/validator_anchor_demo";
+import idl from "../../../target/idl/smartolana.json";
+import type { ValidatorAnchorDemo } from "../../../target/types/smartolana";
 
 const programID: PublicKey = new PublicKey("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
