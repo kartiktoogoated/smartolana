@@ -201,13 +201,13 @@ pub mod validator_anchor_demo {
     pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
         let stake_vault = &mut ctx.accounts.stake_vault;
 
-        // Prevent re staking if already active
+        // Prevent re-staking
         require!(stake_vault.amount == 0, CustomError::AlreadyStaked);
-
-        // Get current timestamp
+        require!(amount > 0, CustomError::ZeroStake);
+    
         let now = Clock::get()?.unix_timestamp;
-
-        // Transfer tokens via CPI (user -> vault ATA)
+    
+        // Token transfer (user → vault ATA)
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
@@ -217,17 +217,18 @@ pub mod validator_anchor_demo {
             },
         );
         token::transfer(cpi_ctx, amount)?;
-
-        // Record stake info
+    
+        // Record data
         stake_vault.owner = ctx.accounts.user.key();
-        stake_vault.vault = ctx.accounts.vault_ata.key();
+        stake_vault.profile = ctx.accounts.profile.key();
         stake_vault.amount = amount;
         stake_vault.start_stake_time = now;
         stake_vault.bump = ctx.bumps.stake_vault;
-
+    
+        msg!("Staked {} tokens at time {}", amount, now);
         Ok(())
     }
-
+    
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -489,24 +490,40 @@ pub struct StakeTokens<'info> {
     pub user: Signer<'info>,
 
     #[account(
+        mut,
+        constraint = profile.authority == user.key()
+    )]
+    pub profile: Account<'info, UserProfile>,
+
+    #[account(
         init_if_needed,
-        seeds = [b"stake_vault", user.key().as_ref()],
+        seeds = [b"stake-vault", user.key().as_ref()],
         bump,
         payer = user,
-        space = StakeVault::LEN,
+        space = StakeVault::LEN
     )]
     pub stake_vault: Account<'info, StakeVault>,
 
     #[account(
         mut,
         constraint = user_ata.owner == user.key(),
+        constraint = user_ata.mint == stake_mint.key(),
     )]
     pub user_ata: Account<'info, TokenAccount>,
 
-    #[account(mut)]
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = stake_mint,
+        associated_token::authority = stake_vault,
+    )]
     pub vault_ata: Account<'info, TokenAccount>,
 
+    #[account(mut)]
+    pub stake_mint: Account<'info, Mint>,
+
     pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -570,16 +587,18 @@ impl VoteRecord {
 
 #[account]
 pub struct StakeVault {
-    pub owner: Pubkey,  // user wallet address
-    pub vault: Pubkey,  // token account that holds staked token
-    pub start_stake_time: i64,  // timestamp of when the stake began
-    pub amount: u64,  // amount of tokens staked
-    pub bump: u8, // bump for PDA
+    pub owner: Pubkey,  // 32 bytes
+    pub profile: Pubkey,  // 32 bytes
+    pub vault: Pubkey,
+    pub amount: u64,  // 8 bytes
+    pub start_stake_time: i64,  // 8 bytes
+    pub bump: u8,  // 1 byte
 }
 
 impl StakeVault {
-    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 1;
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 8 + 8 + 1;
 }
+
 // ----------------- ERROR ---------------------
 
 #[error_code]
@@ -595,4 +614,7 @@ pub enum CustomError {
 
     #[msg("User already has an active stake")]
     AlreadyStaked,
+
+    #[msg("Cannot stake zero amount")]
+    ZeroStake,
 }

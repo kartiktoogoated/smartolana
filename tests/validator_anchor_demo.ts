@@ -239,6 +239,74 @@ describe("validator_anchor_demo", () => {
     );
   });
 
+  it("Stakes tokens from user ATA to stake vault", async () => {
+    const stakeAmount = new anchor.BN(5_000_000_000); // 5 tokens (assuming 9 decimals)
+  
+    // Derive stake vault PDA
+    const [stakeVaultPda, stakeVaultBump] =
+      anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("stake-vault"), user.toBuffer()],
+        program.programId
+      );
+  
+    // Derive user ATA and stake vault ATA
+    const userAta = getAssociatedTokenAddressSync(mintPda, user);
+    const vaultAta = getAssociatedTokenAddressSync(
+      mintPda,
+      stakeVaultPda,
+      true // ✅ allowOwnerOffCurve
+    );    
+  
+    // Fetch balances before staking
+    const userBefore = await getAccount(provider.connection, userAta);
+    const vaultBefore = await getAccount(provider.connection, vaultAta).catch(() => ({
+      amount: BigInt(0),
+    }));
+  
+    // Call the stake_tokens instruction
+    await program.methods
+      .stakeTokens(stakeAmount)
+      .accountsStrict({
+        user,
+        profile: profilePda,
+        stakeVault: stakeVaultPda,
+        userAta,
+        vaultAta,
+        stakeMint: mintPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+  
+    // Fetch updated stakeVault account
+    const stakeVault = await program.account.stakeVault.fetch(stakeVaultPda);
+    const userAfter = await getAccount(provider.connection, userAta);
+    const vaultAfter = await getAccount(provider.connection, vaultAta);
+  
+    // Logs
+    console.log("✅ Staked successfully:");
+    console.log("• Vault Owner      :", stakeVault.owner.toBase58());
+    console.log("• Stake Amount     :", stakeVault.amount.toString());
+    console.log("• Start Stake Time :", stakeVault.startStakeTime.toString());
+  
+    // Assertions
+    assert.strictEqual(stakeVault.owner.toBase58(), user.toBase58());
+    assert.strictEqual(stakeVault.profile.toBase58(), profilePda.toBase58());
+    assert.strictEqual(stakeVault.amount.toString(), stakeAmount.toString());
+  
+    assert.strictEqual(
+      Number(userBefore.amount) - stakeAmount.toNumber(),
+      Number(userAfter.amount)
+    );
+  
+    assert.strictEqual(
+      Number(vaultBefore.amount) + stakeAmount.toNumber(),
+      Number(vaultAfter.amount)
+    );
+  });
+
   it("Reassigns the mint authority", async () => {
     const newAuthority = anchor.web3.Keypair.generate();
 
