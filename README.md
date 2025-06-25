@@ -1,94 +1,116 @@
-Validator Anchor Token Demo -- Solana PDA + Token Minting
-========================================================
+# Validator Anchor Token Demo - Solana PDA + Token Minting
 
-This project demonstrates how to build a PDA-based token minting and validator management system using Anchor and the SPL Token program.
+This project demonstrates a full-featured Solana program using **Anchor** framework with PDA-based account architecture for managing:
 
-* * * * *
+* Token minting
+* Validator registration
+* Governance proposals and voting
+* Token staking with time-locked vaults
 
-📌 **Features**
----------------
+---
 
--   ✅ PDA-based Profile creation
+## Features
 
--   ✅ PDA-based global token mint and mint-authority
+* PDA-based Profile creation (UserProfile)
+* Global Token Mint with PDA Mint Authority
+* Validator metadata and token allocation
+* Secure token transfers and burning
+* Reassignable mint authority (for DAO control)
+* Voting system (create, vote, prevent double-vote)
+* StakeVault with time-lock and validator-linked staking
 
--   ✅ Validator account creation + token allocation
+---
 
--   ✅ Secure token transfers between users
-
--   ✅ Token burning from user ATAs
-
--   ✅ Mint authority re-assignment (DAO-style logic)
-
--   ✅ Fully tested with Anchor + Mocha
-
-* * * * *
-
-🯡 **Program Architecture**
----------------------------
+## Program Architecture
 
 ```
-User (Signer)
-   ├─▶ init_profile       → Creates profile_pda
-   ├─▶ create_mint        → Sets up mint_pda and mint_auth_pda (PDA-based)
-   ├─▶ init_validator     → Creates validator_pda and mints tokens to ATA
-   ├─▶ transfer_tokens    → Sends tokens to another user's ATA
-   ├─▶ burn_tokens        → Burns tokens from own ATA
-   └─▶ reassign_mint_auth → Moves authority to new pubkey (e.g. DAO)
+User Wallet
+ └── init_profile         → Profile PDA ("profile", user)
+ └── create_mint         → Global Mint PDA ("global-mint"), Mint Authority PDA ("mint-authority")
+ └── init_validator      → Validator PDA ("validator", user, id), mints tokens
+ └── transfer_tokens     → Direct token transfers between users
+ └── burn_tokens         → Burns tokens from own ATA
+ └── reassign_mint_auth  → Shifts authority to another pubkey
+ └── create_proposal     → Governance proposal under profile
+ └── vote_on_proposal    → Records vote by a validator
+ └── stake_tokens        → Stake tokens via StakeVault PDA
 ```
 
-* * * * *
+---
 
-🗂 **Accounts Overview**
-------------------------
+## Key Accounts
 
-| Account | PDA | Seeds Used | Description |
-| `UserProfile` | ✅ | `["profile", user_pubkey]` | Stores user's profile name + authority |
-| `ValidatorInfo` | ✅ | `["validator", user_pubkey, id_bytes]` | Validator metadata |
-| `Mint` | ✅ | `["global-mint"]` | Token mint account |
-| `Mint Authority` | ✅ | `["mint-authority"]` | PDA that signs mint/burn/reassign calls |
-| `TokenAccount` | ❌ | Auto-generated ATA | Holds token balances per user |
+| Account       | PDA? | Seeds                           | Purpose                                 |
+| ------------- | ---- | ------------------------------- | --------------------------------------- |
+| UserProfile   | Yes  | `["profile", user]`             | Stores user metadata and authority      |
+| ValidatorInfo | Yes  | `["validator", user, id_bytes]` | Holds validator ID, status, profile ref |
+| Mint          | Yes  | `["global-mint"]`               | SPL Token Mint                          |
+| MintAuthority | Yes  | `["mint-authority"]`            | Used to mint/burn tokens securely       |
+| StakeVault    | Yes  | `["stake-vault", user]`         | Tracks staked amount and timestamp      |
+| TokenAccount  | No   | (ATA)                           | Holds actual token balances             |
 
-* * * * *
+---
 
-📓 **Program Instructions**
----------------------------
+## Instructions
 
-### `init_profile(name: String)`
+### Profile & Mint
 
-Creates a PDA-based profile.
+* `init_profile(name)` → Initializes user profile with bump.
+* `create_mint()` → Creates mint account and PDA authority.
 
-### `create_mint()`
+### Validators
 
-Initializes a new mint using PDA mint authority.
+* `init_validator(id, name)` → Registers validator, mints tokens.
+* `update_validator(name, status)` → Allows update of metadata.
+* `close_validator()` → Closes account and refunds lamports.
 
-### `init_validator(id: u64, name: String)`
+### Token Actions
 
-Creates validator PDA, allocates tokens to user ATA via PDA mint authority.
+* `transfer_tokens(amount)` → Token transfer between users.
+* `burn_tokens(amount)` → Destroys user tokens.
+* `reassign_mint_authority(pubkey)` → Updates mint authority.
 
-### `transfer_tokens(amount: u64)`
+### Governance
 
-Transfers tokens between token accounts. Requires sender signature.
+* `create_proposal(id, title, desc, deadline)` → Starts a vote.
+* `vote_on_proposal(vote: bool)` → Records a single validator vote.
 
-### `burn_tokens(amount: u64)`
+### Staking
 
-Burns tokens from user's token account.
+* `stake_tokens(amount)` → Locks tokens in vault, tracks start time.
 
-### `reassign_mint_authority(new_authority: Pubkey)`
+### Coming Next
 
-Reassigns minting power to a new authority, e.g., a DAO-controlled wallet.
+* `unstake_tokens()` → Withdraws tokens after lock duration.
+* `claim_reward()` → Calculates rewards over stake duration.
+* `init_staking_pool()` → Adds pool config: reward/token/lock logic.
 
-* * * * *
+---
 
-🖋️ **Testing Strategy**
-------------------------
+## Testing
 
-All features are tested with:
+* Anchor framework and Mocha tests
+* Airdrops, ATA creation, CPIs fully tested
+* Error conditions (expired vote, double-stake) validated
 
--   Mocha + Chai
+---
 
--   Anchor test framework
+## Security Practices
 
--   Manual ATA creation + airdrop logic
+* All PDAs have seed-based constraints
+* Token transfers use CPIs
+* Authority ownership validated in context
+* Custom errors and logs ensure safety and transparency
 
--   PDA creation and validation
+---
+
+## Built With
+
+-   [Anchor](https://book.anchor-lang.com/)
+
+-   [Solana](https://solana.com/)
+
+-   [SPL Token](https://spl.solana.com/token)
+
+-   Mocha + Chai (for test coverage)
+
