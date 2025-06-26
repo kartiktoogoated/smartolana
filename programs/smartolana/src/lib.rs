@@ -232,6 +232,44 @@ pub mod smartolana {
         msg!("Staked {} tokens at time {}", amount, now);
         Ok(())
     }
+
+    pub fn unstake_tokens(ctx: Context<UnstakeTokens>) -> Result<()> {
+        let stake_vault = &mut ctx.accounts.stake_vault;
+        let now = Clock::get()?.unix_timestamp;
+    
+        require!(
+            now >= stake_vault.start_stake_time + LOCK_PERIOD_SECONDS,
+            CustomError::StakeLocked
+        );
+    
+        let amount = stake_vault.amount;
+        require!(amount > 0, CustomError::ZeroStake);
+    
+        // Fix temporary borrow issue
+        let user_key = ctx.accounts.user.key();
+        let bump = ctx.bumps.stake_vault;
+        let signer_seeds: &[&[u8]] = &[b"stake-vault", user_key.as_ref(), &[bump]];
+        let signer: &[&[&[u8]]] = &[signer_seeds];
+    
+        // Use already borrowed `stake_vault` here
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.vault_ata.to_account_info(),
+                to: ctx.accounts.user_ata.to_account_info(),
+                authority: stake_vault.to_account_info(),
+            },
+            signer,
+        );
+    
+        token::transfer(cpi_ctx, amount)?;
+    
+        stake_vault.amount = 0;
+        stake_vault.start_stake_time = 0;
+    
+        msg!("Unstaked {} tokens at time {}", amount, now);
+        Ok(())
+    }
     
 }
 
@@ -532,6 +570,42 @@ pub struct StakeTokens<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+#[derive(Accounts)]
+pub struct UnstakeTokens<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = stake_vault.owner == user.key(),
+        seeds = [b"stake-vault", user.key().as_ref()],
+        bump
+    )]
+    pub stake_vault: Account<'info, StakeVault>,
+
+    #[account(
+        mut,
+        constraint = user_ata.owner == user.key(),
+        constraint = user_ata.mint == stake_mint.key()
+    )]
+    pub user_ata: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        associated_token::mint = stake_mint,
+        associated_token::authority = stake_vault
+    )]
+    pub vault_ata: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub stake_mint: Account<'info, Mint>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -621,4 +695,7 @@ pub enum CustomError {
 
     #[msg("Cannot stake zero amount")]
     ZeroStake,
+
+    #[msg("Stake is still locked. Please wait for the lock period to pass.")]
+    StakeLocked,
 }
