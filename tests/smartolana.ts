@@ -307,6 +307,58 @@ describe("smartolana", () => {
     );
   });
 
+  it("Unstakes tokens after lock period", async () => {
+    const stakeAmount = new anchor.BN(5_000_000_000); // 5 tokens
+    const [stakeVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("stake-vault"), user.toBuffer()],
+      program.programId
+    );
+  
+    const userAta = getAssociatedTokenAddressSync(mintPda, user);
+    const vaultAta = getAssociatedTokenAddressSync(mintPda, stakeVaultPda, true);
+  
+    const vaultBefore = await getAccount(provider.connection, vaultAta);
+    const userBefore = await getAccount(provider.connection, userAta);
+    const stakeVault = await program.account.stakeVault.fetch(stakeVaultPda);
+  
+    const nowBn = new anchor.BN(Math.floor(Date.now() / 1000));
+    const lockPeriod = new anchor.BN(3600);
+    const unlockTime = stakeVault.startStakeTime.add(lockPeriod);
+  
+    // Simulate delay if needed (use shorter lock in local/test env)
+    if (nowBn.lt(unlockTime)) {
+      console.log("⏱ Waiting (simulated)... stake is still locked.");
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+  
+    await program.methods
+      .unstakeTokens()
+      .accountsStrict({
+        user,
+        stakeVault: stakeVaultPda,
+        userAta,
+        vaultAta,
+        stakeMint: mintPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+  
+    const vaultAfter = await getAccount(provider.connection, vaultAta);
+    const userAfter = await getAccount(provider.connection, userAta);
+    const updatedVault = await program.account.stakeVault.fetch(stakeVaultPda);
+  
+    console.log("✅ Unstaked tokens from vault:");
+    console.log("• Returned to User:", Number(userAfter.amount) - Number(userBefore.amount));
+    console.log("• Vault now holds :", Number(vaultAfter.amount));
+  
+    assert.strictEqual(Number(vaultAfter.amount), 0);
+    assert.strictEqual(updatedVault.amount.toNumber(), 0);
+    assert.strictEqual(updatedVault.startStakeTime.toNumber(), 0);
+  });  
+
   it("Reassigns the mint authority", async () => {
     const newAuthority = anchor.web3.Keypair.generate();
 

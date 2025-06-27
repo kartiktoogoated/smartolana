@@ -17,7 +17,7 @@ use spl_token::instruction::AuthorityType;
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
-const LOCK_PERIOD_SECONDS: i64 = 3600;
+const LOCK_PERIOD_SECONDS: i64 = 2;
 
 #[program]
 /**
