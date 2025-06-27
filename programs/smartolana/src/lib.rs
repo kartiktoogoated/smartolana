@@ -17,7 +17,14 @@ use spl_token::instruction::AuthorityType;
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
-const LOCK_PERIOD_SECONDS: i64 = 2;
+/**
+ * CONSTANTS
+ * 
+ * LOCK_PERIOD_SECONDS -> locking the funds in vault
+ * REWARD_PER_SECOND -> rewarding user per second of staking in vault 
+ * storing in vault increases the trust on token and is very good for the tokens future
+ */
+const LOCK_PERIOD_SECONDS: i64 = 5; // 3600 must be ideal but for testing its 2
 const REWARD_PER_SECOND: u64 = 1_000_000;  // 0.001 token/sec (9 decimals)
 
 #[program]

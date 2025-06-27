@@ -307,6 +307,42 @@ describe("smartolana", () => {
     );
   });
 
+  it("Claims rewards after staking duration", async () => {
+    const [stakeVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("stake-vault"), user.toBuffer()],
+      program.programId
+    );
+  
+    const userRewardAta = getAssociatedTokenAddressSync(mintPda, user);
+    const [mintAuthPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("mint-authority")],
+      program.programId
+    );
+  
+    console.log("⏳ Waiting to accumulate reward...");
+    await new Promise((res) => setTimeout(res, 3000)); // simulate time delay
+  
+    const before = await getAccount(provider.connection, userRewardAta);
+  
+    await program.methods
+      .claimReward()
+      .accountsStrict({
+        user,
+        stakeVault: stakeVaultPda,
+        userRewardAta,
+        rewardMint: mintPda,
+        mintAuthority: mintAuthPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+  
+    const after = await getAccount(provider.connection, userRewardAta);
+    const claimed = Number(after.amount) - Number(before.amount);
+  
+    console.log("✅ Reward claimed:", claimed);
+    assert.ok(claimed > 0, "Reward should be greater than 0");
+  });  
+
   it("Unstakes tokens after lock period", async () => {
     const stakeAmount = new anchor.BN(5_000_000_000); // 5 tokens
     const [stakeVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
