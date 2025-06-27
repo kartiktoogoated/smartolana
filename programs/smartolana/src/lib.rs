@@ -18,6 +18,7 @@ use spl_token::instruction::AuthorityType;
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
 const LOCK_PERIOD_SECONDS: i64 = 2;
+const REWARD_PER_SECOND: u64 = 1_000_000;  // 0.001 token/sec (9 decimals)
 
 #[program]
 /**
@@ -268,6 +269,48 @@ pub mod smartolana {
         stake_vault.start_stake_time = 0;
     
         msg!("Unstaked {} tokens at time {}", amount, now);
+        Ok(())
+    }
+
+    pub fn claim_reward(ctx: Context<ClaimReward>) -> Result<()> {
+        let stake_vault = &mut ctx.accounts.stake_vault;
+        let now = Clock::get()?.unix_timestamp;
+
+        let elapsed = now
+            .checked_sub(stake_vault.start_stake_time)
+            .ok_or(CustomError::TimeCalculationFailed)?;
+
+        let total_reward = elapsed as u64 * REWARD_PER_SECOND;
+        let unclaimed_reward = total_reward.saturating_sub(stake_vault.reward_collected);
+
+        require!(unclaimed_reward > 0, CustomError::NoRewardAvailable);
+
+        // Mint reward to user
+        let bump = ctx.bumps.mint_authority;
+        let signer_seeds: &[&[u8]] = &[b"mint-authority", &[bump]];
+        let signer: &[&[&[u8]]] = &[signer_seeds];
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            MintTo {
+                mint: ctx.accounts.reward_mint.to_account_info(),
+                to: ctx.accounts.user_reward_ata.to_account_info(),
+                authority: ctx.accounts.mint_authority.to_account_info(),
+            },
+            signer,
+        );
+
+        token::mint_to(cpi_ctx, unclaimed_reward)?;
+
+        stake_vault.reward_collected += unclaimed_reward;
+
+        msg!(
+            "Reward of {} minted to {}, total claimed now: {}",
+            unclaimed_reward,
+            ctx.accounts.user.key(),
+            stake_vault.reward_collected
+        );
+
         Ok(())
     }
     
@@ -606,6 +649,36 @@ pub struct UnstakeTokens<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+#[derive(Accounts)]
+pub struct ClaimReward<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"stake-vault", user.key().as_ref()],
+        bump,
+        constraint = stake_vault.owner == user.key()
+    )]
+    pub stake_vault: Account<'info, StakeVault>,
+
+    #[account(
+        mut,
+        constraint = user_reward_ata.owner == user.key(),
+        constraint = user_reward_ata.mint == reward_mint.key()
+    )]
+    pub user_reward_ata: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub reward_mint: Account<'info, Mint>,
+
+    /// CHECK: mint_authority PDA
+    #[account(seeds = [b"mint-authority"], bump)]
+    pub mint_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -669,12 +742,13 @@ pub struct StakeVault {
     pub profile: Pubkey,  // 32 bytes
     pub vault: Pubkey,
     pub amount: u64,  // 8 bytes
+    pub reward_collected: u64, // 8 bytes
     pub start_stake_time: i64,  // 8 bytes
     pub bump: u8,  // 1 byte
 }
 
 impl StakeVault {
-    pub const LEN: usize = 8 + 32 + 32 + 32 + 8 + 8 + 1;
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 8 + 8 + 8 + 1;
 }
 
 // ----------------- ERROR ---------------------
@@ -698,4 +772,10 @@ pub enum CustomError {
 
     #[msg("Stake is still locked. Please wait for the lock period to pass.")]
     StakeLocked,
+
+    #[msg("No rewards available to claim")]
+    NoRewardAvailable,
+
+    #[msg("Stake time calculation failed")]
+    TimeCalculationFailed,
 }
