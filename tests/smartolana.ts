@@ -14,13 +14,21 @@ describe("smartolana", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace
-    .Smartolana as Program<Smartolana>;
+  const program = anchor.workspace.Smartolana as Program<Smartolana>;
 
   const id = 42;
   const idBytes = new anchor.BN(id).toArrayLike(Buffer, "le", 8);
 
   const user = provider.wallet.publicKey;
+
+  const poolId = new anchor.BN(99);
+  const poolIdBytes = poolId.toArrayLike(Buffer, "le", 8);
+
+  const [stakingPoolPda, stakingPoolBump] =
+    anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("pool"), user.toBuffer(), poolIdBytes],
+      program.programId
+    );
 
   // PDA Definitions
   const [profilePda, profileBump] =
@@ -239,30 +247,58 @@ describe("smartolana", () => {
     );
   });
 
+  it("Initializes a staking pool", async () => {
+    await program.methods
+      .initStakingPool(poolId, "Default Pool", new anchor.BN(1000000)) // 0.001 per sec
+      .accountsStrict({
+        pool: stakingPoolPda,
+        authority: user,
+        stakeMint: mintPda,
+        rewardMint: mintPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const poolAccount = await program.account.stakingPool.fetch(stakingPoolPda);
+
+    console.log("✅ StakingPool Created:");
+    console.log("• ID      :", poolAccount.id.toNumber());
+    console.log("• Name    :", poolAccount.name);
+    console.log("• Mint    :", poolAccount.stakeMint.toBase58());
+    console.log("• Reward/s:", poolAccount.rewardPerSecond.toString());
+
+    expect(poolAccount.id.toNumber()).to.equal(poolId.toNumber());
+    expect(poolAccount.name).to.equal("Default Pool");
+    expect(poolAccount.stakeMint.toBase58()).to.equal(mintPda.toBase58());
+    expect(poolAccount.rewardPerSecond.toNumber()).to.equal(1000000);
+  });
+
   it("Stakes tokens from user ATA to stake vault", async () => {
     const stakeAmount = new anchor.BN(5_000_000_000); // 5 tokens (assuming 9 decimals)
-  
+
     // Derive stake vault PDA
     const [stakeVaultPda, stakeVaultBump] =
       anchor.web3.PublicKey.findProgramAddressSync(
         [Buffer.from("stake-vault"), user.toBuffer()],
         program.programId
       );
-  
+
     // Derive user ATA and stake vault ATA
     const userAta = getAssociatedTokenAddressSync(mintPda, user);
     const vaultAta = getAssociatedTokenAddressSync(
       mintPda,
       stakeVaultPda,
       true // ✅ allowOwnerOffCurve
-    );    
-  
+    );
+
     // Fetch balances before staking
     const userBefore = await getAccount(provider.connection, userAta);
-    const vaultBefore = await getAccount(provider.connection, vaultAta).catch(() => ({
-      amount: BigInt(0),
-    }));
-  
+    const vaultBefore = await getAccount(provider.connection, vaultAta).catch(
+      () => ({
+        amount: BigInt(0),
+      })
+    );
+
     // Call the stake_tokens instruction
     await program.methods
       .stakeTokens(stakeAmount)
@@ -270,6 +306,7 @@ describe("smartolana", () => {
         user,
         profile: profilePda,
         stakeVault: stakeVaultPda,
+        pool: stakingPoolPda,
         userAta,
         vaultAta,
         stakeMint: mintPda,
@@ -279,28 +316,28 @@ describe("smartolana", () => {
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-  
+
     // Fetch updated stakeVault account
     const stakeVault = await program.account.stakeVault.fetch(stakeVaultPda);
     const userAfter = await getAccount(provider.connection, userAta);
     const vaultAfter = await getAccount(provider.connection, vaultAta);
-  
+
     // Logs
     console.log("✅ Staked successfully:");
     console.log("• Vault Owner      :", stakeVault.owner.toBase58());
     console.log("• Stake Amount     :", stakeVault.amount.toString());
     console.log("• Start Stake Time :", stakeVault.startStakeTime.toString());
-  
+
     // Assertions
     assert.strictEqual(stakeVault.owner.toBase58(), user.toBase58());
     assert.strictEqual(stakeVault.profile.toBase58(), profilePda.toBase58());
     assert.strictEqual(stakeVault.amount.toString(), stakeAmount.toString());
-  
+
     assert.strictEqual(
       Number(userBefore.amount) - stakeAmount.toNumber(),
       Number(userAfter.amount)
     );
-  
+
     assert.strictEqual(
       Number(vaultBefore.amount) + stakeAmount.toNumber(),
       Number(vaultAfter.amount)
@@ -312,36 +349,37 @@ describe("smartolana", () => {
       [Buffer.from("stake-vault"), user.toBuffer()],
       program.programId
     );
-  
+
     const userRewardAta = getAssociatedTokenAddressSync(mintPda, user);
     const [mintAuthPda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("mint-authority")],
       program.programId
     );
-  
+
     console.log("⏳ Waiting to accumulate reward...");
     await new Promise((res) => setTimeout(res, 3000)); // simulate time delay
-  
+
     const before = await getAccount(provider.connection, userRewardAta);
-  
+
     await program.methods
       .claimReward()
       .accountsStrict({
         user,
         stakeVault: stakeVaultPda,
+        pool: stakingPoolPda,
         userRewardAta,
         rewardMint: mintPda,
         mintAuthority: mintAuthPda,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .rpc();
-  
+
     const after = await getAccount(provider.connection, userRewardAta);
     const claimed = Number(after.amount) - Number(before.amount);
-  
+
     console.log("✅ Reward claimed:", claimed);
     assert.ok(claimed > 0, "Reward should be greater than 0");
-  });  
+  });
 
   it("Unstakes tokens after lock period", async () => {
     const stakeAmount = new anchor.BN(5_000_000_000); // 5 tokens
@@ -349,24 +387,28 @@ describe("smartolana", () => {
       [Buffer.from("stake-vault"), user.toBuffer()],
       program.programId
     );
-  
+
     const userAta = getAssociatedTokenAddressSync(mintPda, user);
-    const vaultAta = getAssociatedTokenAddressSync(mintPda, stakeVaultPda, true);
-  
+    const vaultAta = getAssociatedTokenAddressSync(
+      mintPda,
+      stakeVaultPda,
+      true
+    );
+
     const vaultBefore = await getAccount(provider.connection, vaultAta);
     const userBefore = await getAccount(provider.connection, userAta);
     const stakeVault = await program.account.stakeVault.fetch(stakeVaultPda);
-  
+
     const nowBn = new anchor.BN(Math.floor(Date.now() / 1000));
     const lockPeriod = new anchor.BN(3600);
     const unlockTime = stakeVault.startStakeTime.add(lockPeriod);
-  
+
     // Simulate delay if needed (use shorter lock in local/test env)
     if (nowBn.lt(unlockTime)) {
       console.log("⏱ Waiting (simulated)... stake is still locked.");
       await new Promise((res) => setTimeout(res, 3000));
     }
-  
+
     await program.methods
       .unstakeTokens()
       .accountsStrict({
@@ -381,19 +423,22 @@ describe("smartolana", () => {
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-  
+
     const vaultAfter = await getAccount(provider.connection, vaultAta);
     const userAfter = await getAccount(provider.connection, userAta);
     const updatedVault = await program.account.stakeVault.fetch(stakeVaultPda);
-  
+
     console.log("✅ Unstaked tokens from vault:");
-    console.log("• Returned to User:", Number(userAfter.amount) - Number(userBefore.amount));
+    console.log(
+      "• Returned to User:",
+      Number(userAfter.amount) - Number(userBefore.amount)
+    );
     console.log("• Vault now holds :", Number(vaultAfter.amount));
-  
+
     assert.strictEqual(Number(vaultAfter.amount), 0);
     assert.strictEqual(updatedVault.amount.toNumber(), 0);
     assert.strictEqual(updatedVault.startStakeTime.toNumber(), 0);
-  });  
+  });
 
   it("Reassigns the mint authority", async () => {
     const newAuthority = anchor.web3.Keypair.generate();
@@ -640,7 +685,7 @@ describe("smartolana", () => {
   it("Rejects vote on expired proposal", async () => {
     const proposalId = new anchor.BN(999);
     const deadline = Math.floor(Date.now() / 1000) + 2; // 2 seconds from now
-  
+
     const [proposalPda] = anchor.web3.PublicKey.findProgramAddressSync(
       [
         Buffer.from("proposal"),
@@ -649,15 +694,20 @@ describe("smartolana", () => {
       ],
       program.programId
     );
-  
+
     const [votePda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("vote"), proposalPda.toBuffer(), validatorPda.toBuffer()],
       program.programId
     );
-  
+
     // Create the proposal with a valid short deadline
     await program.methods
-      .createProposal(proposalId, "Short-lived Proposal", "Expires fast", new anchor.BN(deadline))
+      .createProposal(
+        proposalId,
+        "Short-lived Proposal",
+        "Expires fast",
+        new anchor.BN(deadline)
+      )
       .accountsStrict({
         profile: profilePda,
         proposal: proposalPda,
@@ -665,10 +715,10 @@ describe("smartolana", () => {
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
-  
+
     // Wait for the deadline to expire
     await new Promise((res) => setTimeout(res, 3000));
-  
+
     // Now try voting — should fail due to deadline
     try {
       await program.methods
@@ -687,7 +737,7 @@ describe("smartolana", () => {
       console.log("✅ Rejected expired vote:", err.message);
       expect(err.message).to.include("ProposalExpired");
     }
-  });  
+  });
 
   it("Closes PDA validator account", async () => {
     const preBalance = await provider.connection.getBalance(user);
