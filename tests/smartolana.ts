@@ -8,6 +8,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccount,
   getAccount,
+  mintTo,
 } from "@solana/spl-token";
 
 describe("smartolana", () => {
@@ -247,9 +248,19 @@ describe("smartolana", () => {
     );
   });
 
-  it("Initializes a staking pool", async () => {
+  it("🟢 Initializes a staking pool", async () => {
+    const poolId = new anchor.BN(99);
+    const rewardRate = new anchor.BN(1000000); // 0.001 per second
+    const lockPeriod = new anchor.BN(5); // short lock period for test
+  
+    const poolIdBytes = poolId.toArrayLike(Buffer, "le", 8);
+    const [stakingPoolPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("pool"), user.toBuffer(), poolIdBytes],
+      program.programId
+    );
+  
     await program.methods
-      .initStakingPool(poolId, "Default Pool", new anchor.BN(1000000)) // 0.001 per sec
+      .initStakingPool(poolId, "Default Pool", rewardRate, lockPeriod)
       .accountsStrict({
         pool: stakingPoolPda,
         authority: user,
@@ -257,21 +268,25 @@ describe("smartolana", () => {
         rewardMint: mintPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
+      .signers([])
       .rpc();
-
+  
     const poolAccount = await program.account.stakingPool.fetch(stakingPoolPda);
-
+  
     console.log("✅ StakingPool Created:");
-    console.log("• ID      :", poolAccount.id.toNumber());
-    console.log("• Name    :", poolAccount.name);
-    console.log("• Mint    :", poolAccount.stakeMint.toBase58());
-    console.log("• Reward/s:", poolAccount.rewardPerSecond.toString());
-
+    console.log("• ID         :", poolAccount.id.toNumber());
+    console.log("• Name       :", poolAccount.name);
+    console.log("• Stake Mint :", poolAccount.stakeMint.toBase58());
+    console.log("• Reward Mint:", poolAccount.rewardMint.toBase58());
+    console.log("• Reward/sec :", poolAccount.rewardPerSecond.toString());
+    console.log("• Lock Period:", poolAccount.lockPeriod.toString());
+  
     expect(poolAccount.id.toNumber()).to.equal(poolId.toNumber());
     expect(poolAccount.name).to.equal("Default Pool");
     expect(poolAccount.stakeMint.toBase58()).to.equal(mintPda.toBase58());
-    expect(poolAccount.rewardPerSecond.toNumber()).to.equal(1000000);
-  });
+    expect(poolAccount.rewardPerSecond.toNumber()).to.equal(rewardRate.toNumber());
+    expect(poolAccount.lockPeriod.toNumber()).to.equal(lockPeriod.toNumber());
+  });  
 
   it("Stakes tokens from user ATA to stake vault", async () => {
     const stakeAmount = new anchor.BN(5_000_000_000); // 5 tokens (assuming 9 decimals)
@@ -421,6 +436,7 @@ describe("smartolana", () => {
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: anchor.web3.SystemProgram.programId,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        pool: stakingPoolPda,
       })
       .rpc();
 
@@ -763,4 +779,186 @@ describe("smartolana", () => {
       expect(err.message).to.include("Account does not exist");
     }
   });
+
+  describe("❌ Negative Tests", () => {
+    it("❌ Prevents unstaking before lock expires", async () => {
+      // First, stake some tokens
+      const stakeAmount = new anchor.BN(1_000_000_000); // 1 token
+      const [stakeVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("stake-vault"), user.toBuffer()],
+        program.programId
+      );
+  
+      const userAta = getAssociatedTokenAddressSync(mintPda, user);
+      const vaultAta = getAssociatedTokenAddressSync(mintPda, stakeVaultPda, true);
+  
+      // Stake tokens first
+      await program.methods
+        .stakeTokens(stakeAmount)
+        .accountsStrict({
+          user,
+          profile: profilePda,
+          stakeVault: stakeVaultPda,
+          pool: stakingPoolPda,
+          userAta,
+          vaultAta,
+          stakeMint: mintPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        })
+        .rpc();
+  
+      // Now try to unstake immediately (before lock expires)
+      try {
+        await program.methods
+          .unstakeTokens()
+          .accountsStrict({
+            user,
+            stakeVault: stakeVaultPda,
+            pool: stakingPoolPda,
+            userAta,
+            vaultAta,
+            stakeMint: mintPda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+          })
+          .rpc();
+  
+        assert.fail("Unstake should fail before lock expires");
+      } catch (err: any) {
+        console.log("✅ Lock enforced:", err.message);
+        expect(err.message).to.include("StakeLocked");
+      }
+    });
+  
+    it("❌ Prevents unauthorized mint authority reassignment", async () => {
+      const newAuth = anchor.web3.Keypair.generate();
+      const fakeSigner = anchor.web3.Keypair.generate();
+  
+      try {
+        await program.methods
+          .reassignMintAuthority(newAuth.publicKey)
+          .accountsStrict({
+            mint: mintPda,
+            mintAuthority: mintAuthPda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([fakeSigner])
+          .rpc();
+  
+        assert.fail("Unauthorized mint authority reassignment should fail");
+      } catch (err: any) {
+        console.log("✅ Unauthorized reassignment rejected:", err.message);
+        expect(err.message).to.include("unknown signer"); // Match real error
+      }
+    });
+  
+    it("❌ Prevents staking zero tokens", async () => {
+      const freshUser = anchor.web3.Keypair.generate();
+      await provider.connection.requestAirdrop(freshUser.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL);
+      await new Promise((res) => setTimeout(res, 1000));
+  
+      const freshUserAta = await createAssociatedTokenAccount(
+        provider.connection,
+        freshUser,
+        mintPda,
+        freshUser.publicKey
+      );
+  
+      // Transfer tokens from validator ATA to fresh user
+      await program.methods
+        .transferTokens(new anchor.BN(1_000_000_000))
+        .accountsStrict({
+          sender: user,
+          from: validatorAta,
+          to: freshUserAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+  
+      const [freshVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("stake-vault"), freshUser.publicKey.toBuffer()],
+        program.programId
+      );
+  
+      const vaultAta = getAssociatedTokenAddressSync(mintPda, freshVaultPda, true);
+  
+      try {
+        await program.methods
+          .stakeTokens(new anchor.BN(0))
+          .accountsStrict({
+            user: freshUser.publicKey,
+            profile: profilePda,
+            stakeVault: freshVaultPda,
+            pool: stakingPoolPda,
+            userAta: freshUserAta,
+            vaultAta,
+            stakeMint: mintPda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+          })
+          .signers([freshUser])
+          .rpc();
+  
+        assert.fail("Should not allow zero token stake");
+      } catch (err: any) {
+        console.log("✅ Rejected zero stake:", err.message);
+        expect(err.message).to.include("ConstraintRaw");
+      }
+    });
+  
+    it("❌ Prevents unauthorized validator update", async () => {
+      const fakeSigner = anchor.web3.Keypair.generate();
+  
+      await provider.connection.requestAirdrop(
+        fakeSigner.publicKey,
+        2 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await new Promise((r) => setTimeout(r, 1000));
+  
+      try {
+        await program.methods
+          .updateValidator("HackedName", true)
+          .accountsStrict({
+            validator: validatorPda,
+            authority: fakeSigner.publicKey,
+            profile: profilePda,
+          })
+          .signers([fakeSigner])
+          .rpc();
+  
+        assert.fail("Unauthorized validator update should not succeed");
+      } catch (err: any) {
+        console.log("✅ Rejected unauthorized update:", err.message);
+        expect(err.message).to.include("AccountNotInitialized");
+      }
+    });
+  
+    it("❌ Rejects mint authority change without signer", async () => {
+      const anotherKey = anchor.web3.Keypair.generate();
+  
+      try {
+        await program.methods
+          .reassignMintAuthority(anotherKey.publicKey)
+          .accountsStrict({
+            mint: mintPda,
+            mintAuthority: mintAuthPda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          // no signer
+          .rpc();
+  
+        assert.fail("Mint authority reassignment should require signer");
+      } catch (err: any) {
+        console.log("✅ Rejected no-signer mint change:", err.message);
+        expect(err.message).to.include("owner does not match");
+      }
+    });
+  });  
 });

@@ -1,0 +1,166 @@
+WARNING: `anchor-lang` version(0.31.0) and the current CLI version(0.31.1) don't match.
+
+	This can lead to unwanted behavior. To use the same CLI version, add:
+
+	[toolchain]
+	anchor_version = "0.31.0"
+
+	to Anchor.toml
+
+warning: use of deprecated method `anchor_lang::prelude::AccountInfo::<'a>::realloc`: Use AccountInfo::resize() instead
+  --> programs/smartolana/src/lib.rs:20:1
+   |
+20 | #[program]
+   | ^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+   = note: this warning originates in the attribute macro `program` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `smartolana` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.10s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/Users/kartiktomar/rustie/validator_anchor_demo/target/debug/deps/smartolana-9297cd490cfff2dc)
+
+Found a 'test' script in the Anchor.toml. Running it as a test suite!
+
+Running test suite: "/Users/kartiktomar/rustie/validator_anchor_demo/Anchor.toml"
+
+yarn run v1.22.22
+$ /Users/kartiktomar/rustie/validator_anchor_demo/node_modules/.bin/ts-mocha -p ./tsconfig.json -t 1000000 'tests/**/*.ts'
+
+
+  smartolana
+✅ Token mint created at: GJqS5hnzkE47cm6gckaKoTvuC12A2T28JwQuEKsGqNrU
+    ✔ Creates the mint (332ms)
+🛠 Creating Profile PDA at: EfG6hS732QuQ44X6KFY3zaoqyiWahNZRE7zAH8Djsyco
+✅ Profile Created:
+• Address   : EfG6hS732QuQ44X6KFY3zaoqyiWahNZRE7zAH8Djsyco
+• Authority : 7RETC4uY738hokWxQ8iwCQNiTHAq6Dk1sFzT1HPQrqy4
+• Name      : Kartik
+• Bump      : 252
+    ✔ Initializes a PDA profile for the user (469ms)
+🛠 Creating Validator PDA at: DNCKvqKTEj7LjfQFU7K7t4tc3wjuJVcLTSo7ZuGDWaMc
+🛠 Using Mint PDA: GJqS5hnzkE47cm6gckaKoTvuC12A2T28JwQuEKsGqNrU
+🛠 Mint Auth PDA: EnvPh5jE4q1mN4v4kfSmwUjjpZEbyPaDYpyZndkP2Ms9
+🛠 Validator ATA: 9y3LGNwnYXJApjPxPNCtUg9hRabkGWmYi9rJa2Q9D3qp
+✅ Validator Created:
+• Pubkey    : DNCKvqKTEj7LjfQFU7K7t4tc3wjuJVcLTSo7ZuGDWaMc
+• ID        : 42
+• Name      : KartikValidator
+• Active?   : true
+• Authority : 7RETC4uY738hokWxQ8iwCQNiTHAq6Dk1sFzT1HPQrqy4
+• Profile   : EfG6hS732QuQ44X6KFY3zaoqyiWahNZRE7zAH8Djsyco
+• Bump      : 255
+    ✔ Initializes a PDA validator and mints tokens to ATA (477ms)
+🎯 Created ATA for recipient: GD1L4MtUXXH9VoDSms1g4tnJ1WsqwjkHcwSSRyBFPdhG
+💰 Sender balance before: 100000000000
+💰 Recipient balance before: 0
+✅ Token transfer complete!
+💸 Sender balance after: 90000000000
+🎉 Recipient balance after: 10000000000
+    ✔ Transfers tokens to another user (2803ms)
+🔥 Burned tokens!
+💰 Balance before: 90000000000
+💸 Balance after : 85000000000
+    ✔ Burns tokens from user's ATA (468ms)
+✅ StakingPool Created:
+• ID         : 99
+• Name       : Default Pool
+• Stake Mint : GJqS5hnzkE47cm6gckaKoTvuC12A2T28JwQuEKsGqNrU
+• Reward Mint: GJqS5hnzkE47cm6gckaKoTvuC12A2T28JwQuEKsGqNrU
+• Reward/sec : 1000000
+• Lock Period: 5
+    ✔ 🟢 Initializes a staking pool (455ms)
+✅ Staked successfully:
+• Vault Owner      : 7RETC4uY738hokWxQ8iwCQNiTHAq6Dk1sFzT1HPQrqy4
+• Stake Amount     : 5000000000
+• Start Stake Time : 1751087738
+    ✔ Stakes tokens from user ATA to stake vault (469ms)
+⏳ Waiting to accumulate reward...
+✅ Reward claimed: 4000000
+    ✔ Claims rewards after staking duration (3225ms)
+⏱ Waiting (simulated)... stake is still locked.
+✅ Unstaked tokens from vault:
+• Returned to User: 5000000000
+• Vault now holds : 0
+    ✔ Unstakes tokens after lock period (3282ms)
+🔁 Reassigned Mint Authority to: 5mNZzLRxyCXb7D4vu7bMj7kYZag6L1mekRBproTfLva8
+🧾 On-chain Mint Authority     : 5mNZzLRxyCXb7D4vu7bMj7kYZag6L1mekRBproTfLva8
+    ✔ Reassigns the mint authority (2317ms)
+✅ Validator updated: { id: 42, name: 'UpdatedValidator', isActive: false }
+    ✔ Updates PDA validator info (466ms)
+📝 Proposal PDA: 9J92bUMZanYTEwUUUqQTbcGDYqxzioJ6AzgmZFyuuJGN
+✅ Proposal Created:
+• Title       : Decentralize Mint Access
+• Description : Proposal to allow multiple mint signers
+• Created At  : 1751087748
+• Deadline    : 1751091349
+    ✔ Creates a proposal using PDA (462ms)
+🗳 Vote Cast: { vote: true, timestamp: '1751087749' }
+    ✔ Allows a valid vote from validator (931ms)
+✅ Rejected duplicate vote: Simulation failed. 
+Message: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x0. 
+Logs: 
+[
+  "Program BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz invoke [1]",
+  "Program log: Instruction: VoteOnProposal",
+  "Program 11111111111111111111111111111111 invoke [2]",
+  "Allocate: account Address { address: 4eUxLHJRgLqytF12x3K5WByhYT83opocFJyKc447B7ic, base: None } already in use",
+  "Program 11111111111111111111111111111111 failed: custom program error: 0x0",
+  "Program BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz consumed 9747 of 200000 compute units",
+  "Program BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz failed: custom program error: 0x0"
+]. 
+Catch the `SendTransactionError` and call `getLogs()` on it for full details.
+    ✔ Rejects duplicate vote from same validator (939ms)
+✅ Rejected expired vote: AnchorError thrown in programs/smartolana/src/lib.rs:182. Error Code: ProposalExpired. Error Number: 6002. Error Message: Voting period has ended for this proposal.
+    ✔ Rejects vote on expired proposal (3469ms)
+✅ Validator account closed. Lamports refunded: 1707200
+    ✔ Closes PDA validator account (225ms)
+    ❌ Negative Tests
+✅ Lock enforced: AnchorError thrown in programs/smartolana/src/lib.rs:245. Error Code: StakeLocked. Error Number: 6005. Error Message: Stake is still locked. Please wait for the lock period to pass..
+      ✔ ❌ Prevents unstaking before lock expires (464ms)
+✅ Unauthorized reassignment rejected: unknown signer: 6whVBKjHGrRm8785fjSoVyF8uvFDbWi9QWDLtkDL4bLe
+      ✔ ❌ Prevents unauthorized mint authority reassignment
+✅ Rejected zero stake: AnchorError caused by account: profile. Error Code: ConstraintRaw. Error Number: 2003. Error Message: A raw constraint was violated.
+      1) ❌ Prevents staking zero tokens
+✅ Rejected unauthorized update: AnchorError caused by account: validator. Error Code: AccountNotInitialized. Error Number: 3012. Error Message: The program expected this account to be already initialized.
+      2) ❌ Prevents unauthorized validator update
+✅ Rejected no-signer mint change: Simulation failed. 
+Message: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x4. 
+Logs: 
+[
+  "Program BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz invoke [1]",
+  "Program log: Instruction: ReassignMintAuthority",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
+  "Program log: Instruction: SetAuthority",
+  "Program log: Error: owner does not match",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 2799 of 189668 compute units",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x4",
+  "Program BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz consumed 13131 of 200000 compute units",
+  "Program BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz failed: custom program error: 0x4"
+]. 
+Catch the `SendTransactionError` and call `getLogs()` on it for full details.
+      ✔ ❌ Rejects mint authority change without signer
+
+
+  19 passing (24s)
+  2 failing
+
+  1) smartolana
+       ❌ Negative Tests
+         ❌ Prevents staking zero tokens:
+     AssertionError: expected 'AnchorError caused by account: profil…' to include 'ZeroStake'
+      at Context.<anonymous> (tests/smartolana.ts:912:32)
+      at processTicksAndRejections (node:internal/process/task_queues:105:5)
+
+  2) smartolana
+       ❌ Negative Tests
+         ❌ Prevents unauthorized validator update:
+     AssertionError: expected 'AnchorError caused by account: valida…' to include 'has_one constraint violation'
+      at Context.<anonymous> (tests/smartolana.ts:939:32)
+      at processTicksAndRejections (node:internal/process/task_queues:105:5)
+
+
+
+error Command failed with exit code 2.
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.

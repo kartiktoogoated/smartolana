@@ -17,14 +17,6 @@ use spl_token::instruction::AuthorityType;
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
-/**
- * CONSTANTS
- * 
- * LOCK_PERIOD_SECONDS -> locking the funds in vault
- * storing in vault increases the trust on token and is very good for the tokens future
- */
-const LOCK_PERIOD_SECONDS: i64 = 5; // 3600 must be ideal but for testing its 2
-
 #[program]
 /**
 It signals to Anchor the account is an executable one, i.e. a program, and you may issue to it a cross program invocation.
@@ -248,9 +240,10 @@ pub mod smartolana {
     pub fn unstake_tokens(ctx: Context<UnstakeTokens>) -> Result<()> {
         let stake_vault = &mut ctx.accounts.stake_vault;
         let now = Clock::get()?.unix_timestamp;
+        let pool = &ctx.accounts.pool;
     
         require!(
-            now >= stake_vault.start_stake_time + LOCK_PERIOD_SECONDS,
+            now >= stake_vault.start_stake_time + pool.lock_period,
             CustomError::StakeLocked
         );
     
@@ -323,7 +316,7 @@ pub mod smartolana {
         Ok(())
     }
 
-    pub fn init_staking_pool(ctx: Context<InitStakingPool>, id: u64, name: String, reward_per_second: u64,) -> Result<()> {
+    pub fn init_staking_pool(ctx: Context<InitStakingPool>, id: u64, name: String, reward_per_second: u64, lock_period: i64) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         pool.id = id;
         pool.name = name;
@@ -332,6 +325,7 @@ pub mod smartolana {
         pool.reward_mint = ctx.accounts.reward_mint.key();
         pool.reward_per_second = reward_per_second;
         pool.total_staked = 0;
+        pool.lock_period = lock_period;
         pool.bump = ctx.bumps.pool;
         Ok(())
     }
@@ -671,6 +665,12 @@ pub struct UnstakeTokens<'info> {
     #[account(mut)]
     pub stake_mint: Account<'info, Mint>,
 
+    #[account(
+        mut,
+        constraint = stake_vault.pool == pool.key()
+    )]
+    pub pool: Account<'info, StakingPool>,    
+
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -714,7 +714,7 @@ pub struct ClaimReward<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(id: u64, name: String)]
+#[instruction(id: u64, name: String, reward_per_second: u64, lock_period: u64)]
 pub struct InitStakingPool<'info> {
     #[account(
         init,
@@ -816,11 +816,12 @@ pub struct StakingPool {
     pub reward_mint: Pubkey,
     pub reward_per_second: u64,
     pub total_staked: u64,
+    pub lock_period: i64,
     pub bump: u8,
 }
 
 impl StakingPool {
-    pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 1;
+    pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 8 + 1;
 }
 
 // ----------------- ERROR ---------------------
