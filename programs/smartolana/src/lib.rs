@@ -327,6 +327,36 @@ pub mod smartolana {
         pool.total_staked = 0;
         pool.lock_period = lock_period;
         pool.bump = ctx.bumps.pool;
+        pool.reward_vault = ctx.accounts.reward_vault.key();
+        pool.reward_vault_authority_bump = ctx.bumps.reward_vault_authority;
+
+        Ok(())
+    }
+
+    pub fn refill_pool(ctx: Context<RefillPool>, amount: u64) -> Result<()> {
+        // Transfer tokens from admin_ata -> reward_vault
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.admin_ata.to_account_info(),
+                    to: ctx.accounts.reward_vault.to_account_info(),
+                    authority: ctx.accounts.admin.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        // Track internal reward balance
+        let pool = &mut ctx.accounts.pool;
+        pool.reward_balance = pool.reward_balance.saturating_add(amount);
+
+        msg!(
+            "Refilled pool {} with {} tokens into reward vault",
+            pool.id,
+            amount
+        );
+
         Ok(())
     }
     
@@ -731,7 +761,52 @@ pub struct InitStakingPool<'info> {
     pub stake_mint: Account<'info, Mint>,
     pub reward_mint: Account<'info, Mint>,
 
+    // Reward vault ATA (owned by PDA)
+    #[account(
+        init,
+        payer = authority,
+        associated_token::mint = reward_mint,
+        associated_token::authority = reward_vault_authority
+    )]
+    pub reward_vault: Account<'info, TokenAccount>,
+
+    // PDA authority for the reward vault
+    /// CHECK: PDA authority for vault, validated by seeds
+    #[account(
+        seeds = [b"reward-vault", pool.key().as_ref()],
+        bump
+    )]
+    pub reward_vault_authority: UncheckedAccount<'info>,
+
     pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct RefillPool<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    // Ensure admin is tranferring from their own ATA (must match reward mint)
+    #[account(
+        mut,
+        constraint = admin_ata.owner == admin.key(),
+        constraint = admin_ata.mint == pool.reward_mint
+    )]
+    pub admin_ata: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub reward_vault: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        has_one = reward_vault,
+        constraint = pool.authority == admin.key()
+    )]
+    pub pool: Account<'info, StakingPool>,
+
+    pub token_program: Program<'info, Token>
 }
 
 // ----------------- ACCOUNT STRUCTS ---------------------
@@ -817,11 +892,14 @@ pub struct StakingPool {
     pub reward_per_second: u64,
     pub total_staked: u64,
     pub lock_period: i64,
+    pub reward_vault: Pubkey,
+    pub reward_vault_authority_bump: u8,
+    pub reward_balance: u64, // total tokens available for rewards
     pub bump: u8,
 }
 
 impl StakingPool {
-    pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 8 + 1;
+    pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 8 + 32 + 1 + 1;
 }
 
 // ----------------- ERROR ---------------------
