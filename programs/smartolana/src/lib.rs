@@ -21,11 +21,9 @@ declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
  * CONSTANTS
  * 
  * LOCK_PERIOD_SECONDS -> locking the funds in vault
- * REWARD_PER_SECOND -> rewarding user per second of staking in vault 
  * storing in vault increases the trust on token and is very good for the tokens future
  */
 const LOCK_PERIOD_SECONDS: i64 = 5; // 3600 must be ideal but for testing its 2
-const REWARD_PER_SECOND: u64 = 1_000_000;  // 0.001 token/sec (9 decimals)
 
 #[program]
 /**
@@ -213,13 +211,12 @@ pub mod smartolana {
     pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
         let stake_vault = &mut ctx.accounts.stake_vault;
 
-        // Prevent re-staking
         require!(stake_vault.amount == 0, CustomError::AlreadyStaked);
         require!(amount > 0, CustomError::ZeroStake);
-    
+
         let now = Clock::get()?.unix_timestamp;
-    
-        // Token transfer (user → vault ATA)
+
+        // Transfer tokens from user ATA to vault ATA
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
@@ -229,15 +226,22 @@ pub mod smartolana {
             },
         );
         token::transfer(cpi_ctx, amount)?;
-    
-        // Record data
+
+        // Record staking data
         stake_vault.owner = ctx.accounts.user.key();
         stake_vault.profile = ctx.accounts.profile.key();
+        stake_vault.vault = ctx.accounts.vault_ata.key();
         stake_vault.amount = amount;
         stake_vault.start_stake_time = now;
+        stake_vault.reward_collected = 0;
+        stake_vault.pool = ctx.accounts.pool.key();
         stake_vault.bump = ctx.bumps.stake_vault;
-    
-        msg!("Staked {} tokens at time {}", amount, now);
+
+        // Update pool stats
+        let pool = &mut ctx.accounts.pool;
+        pool.total_staked = pool.total_staked.checked_add(amount).unwrap();
+
+        msg!("Staked {} tokens at time {} into pool {}", amount, now, pool.id);
         Ok(())
     }
 
@@ -287,15 +291,14 @@ pub mod smartolana {
             .checked_sub(stake_vault.start_stake_time)
             .ok_or(CustomError::TimeCalculationFailed)?;
 
-        let total_reward = elapsed as u64 * REWARD_PER_SECOND;
-        let unclaimed_reward = total_reward.saturating_sub(stake_vault.reward_collected);
+        let reward_rate = ctx.accounts.pool.reward_per_second;
+        let total_reward = elapsed as u64 * reward_rate;
+        let pending = total_reward.saturating_sub(stake_vault.reward_collected);
 
-        require!(unclaimed_reward > 0, CustomError::NoRewardAvailable);
+        require!(pending > 0, CustomError::NoRewardAvailable);
 
-        // Mint reward to user
         let bump = ctx.bumps.mint_authority;
-        let signer_seeds: &[&[u8]] = &[b"mint-authority", &[bump]];
-        let signer: &[&[&[u8]]] = &[signer_seeds];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"mint-authority", &[bump]]];
 
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -304,20 +307,32 @@ pub mod smartolana {
                 to: ctx.accounts.user_reward_ata.to_account_info(),
                 authority: ctx.accounts.mint_authority.to_account_info(),
             },
-            signer,
+            signer_seeds
         );
 
-        token::mint_to(cpi_ctx, unclaimed_reward)?;
-
-        stake_vault.reward_collected += unclaimed_reward;
+        token::mint_to(cpi_ctx, pending)?;
+        stake_vault.reward_collected += pending;
 
         msg!(
-            "Reward of {} minted to {}, total claimed now: {}",
-            unclaimed_reward,
+            "Minted {} tokens as reward to user {} from pool {}",
+            pending,
             ctx.accounts.user.key(),
-            stake_vault.reward_collected
+            ctx.accounts.pool.id
         );
 
+        Ok(())
+    }
+
+    pub fn init_staking_pool(ctx: Context<InitStakingPool>, id: u64, name: String, reward_per_second: u64,) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        pool.id = id;
+        pool.name = name;
+        pool.authority = ctx.accounts.authority.key();
+        pool.stake_mint = ctx.accounts.stake_mint.key();
+        pool.reward_mint = ctx.accounts.reward_mint.key();
+        pool.reward_per_second = reward_per_second;
+        pool.total_staked = 0;
+        pool.bump = ctx.bumps.pool;
         Ok(())
     }
     
@@ -614,6 +629,12 @@ pub struct StakeTokens<'info> {
     #[account(mut)]
     pub stake_mint: Account<'info, Mint>,
 
+    #[account(
+        mut,
+        constraint = pool.stake_mint == stake_mint.key(),
+    )]
+    pub pool: Account<'info, StakingPool>,
+
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -683,7 +704,34 @@ pub struct ClaimReward<'info> {
     #[account(seeds = [b"mint-authority"], bump)]
     pub mint_authority: UncheckedAccount<'info>,
 
+    #[account(
+        mut,
+        constraint = stake_vault.pool == pool.key()
+    )]
+    pub pool: Account<'info, StakingPool>,
+
     pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+#[instruction(id: u64, name: String)]
+pub struct InitStakingPool<'info> {
+    #[account(
+        init,
+        payer = authority,
+        seeds = [b"pool", authority.key().as_ref(), &id.to_le_bytes()],
+        bump,
+        space = StakingPool::LEN
+    )]
+    pub pool: Account<'info, StakingPool>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    pub stake_mint: Account<'info, Mint>,
+    pub reward_mint: Account<'info, Mint>,
+
+    pub system_program: Program<'info, System>,
 }
 
 // ----------------- ACCOUNT STRUCTS ---------------------
@@ -748,6 +796,7 @@ pub struct StakeVault {
     pub owner: Pubkey,  // 32 bytes
     pub profile: Pubkey,  // 32 bytes
     pub vault: Pubkey,
+    pub pool: Pubkey,
     pub amount: u64,  // 8 bytes
     pub reward_collected: u64, // 8 bytes
     pub start_stake_time: i64,  // 8 bytes
@@ -755,7 +804,23 @@ pub struct StakeVault {
 }
 
 impl StakeVault {
-    pub const LEN: usize = 8 + 32 + 32 + 32 + 8 + 8 + 8 + 1;
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 1;
+}
+
+#[account]
+pub struct StakingPool {
+    pub id: u64,
+    pub name: String,
+    pub authority: Pubkey, // pool creator
+    pub stake_mint: Pubkey,
+    pub reward_mint: Pubkey,
+    pub reward_per_second: u64,
+    pub total_staked: u64,
+    pub bump: u8,
+}
+
+impl StakingPool {
+    pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 1;
 }
 
 // ----------------- ERROR ---------------------
