@@ -243,7 +243,7 @@ pub mod smartolana {
         let pool = &ctx.accounts.pool;
     
         require!(
-            now >= stake_vault.start_stake_time + pool.lock_period,
+            now >= stake_vault.start_stake_time + pool.lock_period as i64,
             CustomError::StakeLocked
         );
     
@@ -290,6 +290,12 @@ pub mod smartolana {
 
         require!(pending > 0, CustomError::NoRewardAvailable);
 
+        let vault_balance = ctx.accounts.reward_vault.amount;
+        require!(
+            vault_balance >= pending,
+            CustomError::InsufficientRewardVault
+        );
+
         let bump = ctx.bumps.mint_authority;
         let signer_seeds: &[&[&[u8]]] = &[&[b"mint-authority", &[bump]]];
 
@@ -306,6 +312,9 @@ pub mod smartolana {
         token::mint_to(cpi_ctx, pending)?;
         stake_vault.reward_collected += pending;
 
+        // Deduct from internal reward balance
+        ctx.accounts.pool.reward_balance = ctx.accounts.pool.reward_balance.saturating_sub(pending);
+
         msg!(
             "Minted {} tokens as reward to user {} from pool {}",
             pending,
@@ -316,7 +325,7 @@ pub mod smartolana {
         Ok(())
     }
 
-    pub fn init_staking_pool(ctx: Context<InitStakingPool>, id: u64, name: String, reward_per_second: u64, lock_period: i64) -> Result<()> {
+    pub fn init_staking_pool(ctx: Context<InitStakingPool>, id: u64, name: String, reward_per_second: u64, lock_period: u64) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         pool.id = id;
         pool.name = name;
@@ -355,6 +364,23 @@ pub mod smartolana {
             "Refilled pool {} with {} tokens into reward vault",
             pool.id,
             amount
+        );
+
+        Ok(())
+    }
+
+    pub fn update_pool_config(ctx: Context<UpdatePoolConfig>, new_rate: u64, new_lock_period: u64, pause: bool) -> Result<()> {
+        let pool = &mut ctx.accounts.staking_pool;
+
+        pool.reward_per_second = new_rate;
+        pool.lock_period = new_lock_period;
+        pool.paused = pause;
+
+        msg!(
+            "Updated pool config → rate: {}, lock: {}, paused: {}",
+            new_rate,
+            new_lock_period,
+            pause
         );
 
         Ok(())
@@ -730,13 +756,18 @@ pub struct ClaimReward<'info> {
     #[account(mut)]
     pub reward_mint: Account<'info, Mint>,
 
+    #[account(mut)]
+    pub reward_vault: Account<'info, TokenAccount>,
+
     /// CHECK: mint_authority PDA
     #[account(seeds = [b"mint-authority"], bump)]
     pub mint_authority: UncheckedAccount<'info>,
 
     #[account(
         mut,
-        constraint = stake_vault.pool == pool.key()
+        constraint = stake_vault.pool == pool.key(),
+        constraint = pool.reward_mint == reward_mint.key(),
+        constraint = pool.reward_vault == reward_vault.key()
     )]
     pub pool: Account<'info, StakingPool>,
 
@@ -807,6 +838,13 @@ pub struct RefillPool<'info> {
     pub pool: Account<'info, StakingPool>,
 
     pub token_program: Program<'info, Token>
+}
+
+#[derive(Accounts)]
+pub struct UpdatePoolConfig<'info> {
+    #[account(mut, has_one = authority)]
+    pub staking_pool: Account<'info, StakingPool>,
+    pub authority: Signer<'info>,
 }
 
 // ----------------- ACCOUNT STRUCTS ---------------------
@@ -891,15 +929,16 @@ pub struct StakingPool {
     pub reward_mint: Pubkey,
     pub reward_per_second: u64,
     pub total_staked: u64,
-    pub lock_period: i64,
+    pub lock_period: u64,
     pub reward_vault: Pubkey,
     pub reward_vault_authority_bump: u8,
     pub reward_balance: u64, // total tokens available for rewards
+    pub paused: bool,
     pub bump: u8,
 }
 
 impl StakingPool {
-    pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 8 + 32 + 1 + 1;
+    pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 8 + 32 + 1 + 1 + 1;
 }
 
 // ----------------- ERROR ---------------------
@@ -929,4 +968,7 @@ pub enum CustomError {
 
     #[msg("Stake time calculation failed")]
     TimeCalculationFailed,
+
+    #[msg("Insufficient reward vault balance")]
+    InsufficientRewardVault,
 }
