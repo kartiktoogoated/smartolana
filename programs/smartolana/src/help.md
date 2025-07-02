@@ -1,3 +1,6 @@
+Instructions come first, then the #[derive(Accounts)] context defines the required accounts, and the #[account] struct defines the data layout inside those accounts.
+
+
 #[derive(...)]
 This is a Rust macro that automatically implements traits for a struct.
 

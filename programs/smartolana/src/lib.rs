@@ -409,10 +409,14 @@ pub mod smartolana {
         ctx: Context<InitEscrow>,
         amount_offered: u64,
         amount_expected: u64,
+        unlock_at: i64,
     ) -> Result<()> {
+        let clock = Clock::get()?;
+        require!(unlock_at > clock.unix_timestamp, CustomError::InvalidDeadline);
+
         let escrow = &mut ctx.accounts.escrow;
-    
-        // Transfer offered tokens from user to PDA vault
+
+        // Transfer offered tokens into vault PDA
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
@@ -422,25 +426,82 @@ pub mod smartolana {
             },
         );
         token::transfer(cpi_ctx, amount_offered)?;
-    
+
         escrow.initializer = ctx.accounts.initializer.key();
-        escrow.initializer_deposit_token_account =
-            ctx.accounts.initializer_deposit_token_account.key();
+        escrow.initializer_deposit_token_account = ctx.accounts.initializer_deposit_token_account.key();
         escrow.vault_amount = ctx.accounts.vault_amount.key();
         escrow.mint_offered = ctx.accounts.mint_offered.key();
         escrow.mint_expected = ctx.accounts.mint_expected.key();
         escrow.amount_offered = amount_offered;
         escrow.amount_expected = amount_expected;
+        escrow.unlock_at = unlock_at; 
         escrow.is_fulfilled = false;
         escrow.bump = ctx.bumps.escrow;
-    
-        msg!(
-            "Escrow created: offering {} of mint {} expecting mint {}",
-            amount_offered,
-            escrow.mint_offered,
-            escrow.mint_expected
+
+
+        Ok(())
+    }
+
+    pub fn fulfill_escrow(ctx: Context<FulfillEscrow>) -> Result<()> {
+        let clock = Clock::get()?;
+        let escrow = &mut ctx.accounts.escrow;
+
+        require!(!escrow.is_fulfilled, CustomError::AlreadyFulfilled);
+        require!(clock.unix_timestamp >= escrow.unlock_at, CustomError::StakeLocked);
+
+        // Transfer expected tokens from taker -> initializer
+        let pay_initializer_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.taker_payment_ata.to_account_info(),
+                to: ctx.accounts.initializer_receive_ata.to_account_info(),
+                authority: ctx.accounts.taker.to_account_info(),
+            },
         );
-    
+        token::transfer(pay_initializer_ctx, escrow.amount_expected)?;
+
+        // Transfer offered tokens from vault -> taker
+        let bump = ctx.bumps.vault_authority;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault-authority", escrow.initializer.as_ref(), &[bump]]];
+
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.vault_amount.to_account_info(),
+                to: ctx.accounts.taker_receive_ata.to_account_info(),
+                authority: ctx.accounts.vault_authority.to_account_info(),
+            },
+            signer_seeds,
+        );
+        token::transfer(cpi_ctx, escrow.amount_offered)?;
+
+        escrow.is_fulfilled = true;
+
+        Ok(())
+    }
+
+    pub fn cancel_escrow(ctx: Context<CancelEscrow>) -> Result<()> {
+        let escrow = &mut ctx.accounts.escrow;
+
+        require!(!escrow.is_fulfilled, CustomError::AlreadyFulfilled);
+        require!(ctx.accounts.initializer.key() == escrow.initializer, CustomError::Unauthorized);
+
+        // Return locked tokens back to initializer
+        let bump = ctx.bumps.vault_authority;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault-authority", escrow.initializer.as_ref(), &[bump]]];
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.vault_amount.to_account_info(),
+                to: ctx.accounts.initializer_receive_ata.to_account_info(),
+                authority: ctx.accounts.vault_authority.to_account_info(),
+            },
+            signer_seeds,
+        );
+        token::transfer(cpi_ctx, escrow.amount_offered)?;
+
         Ok(())
     }
     
@@ -954,6 +1015,72 @@ pub struct InitEscrow<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+#[derive(Accounts)]
+pub struct FulfillEscrow<'info> {
+    #[account(mut)]
+    pub taker: Signer<'info>,
+
+    #[account(mut, constraint = taker_payment_ata.owner == taker.key())]
+    pub taker_payment_ata: Account<'info, TokenAccount>,
+
+    #[account(mut, constraint = initializer_receive_ata.owner == escrow.initializer)]
+    pub initializer_receive_ata: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub vault_amount: Account<'info, TokenAccount>,
+
+    #[account(
+        seeds = [b"vault-authority", escrow.initializer.as_ref()],
+        bump
+    )]
+    /// CHECK: Vault authority PDA for signing transfer
+    pub vault_authority: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub taker_receive_ata: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"escrow", escrow.initializer.as_ref()],
+        bump,
+        has_one = vault_amount @ CustomError::Unauthorized,
+        constraint = !escrow.is_fulfilled @ CustomError::AlreadyFulfilled
+    )]
+    pub escrow: Account<'info, Escrow>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct CancelEscrow<'info> {
+    #[account(mut)]
+    pub initializer: Signer<'info>,
+
+    #[account(mut)]
+    pub initializer_receive_ata: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub vault_amount: Account<'info, TokenAccount>,
+
+    #[account(
+        seeds = [b"vault-authority", initializer.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA signer
+    pub vault_authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"escrow", initializer.key().as_ref()],
+        bump = escrow.bump,
+        constraint = !escrow.is_fulfilled @ CustomError::AlreadyFulfilled,
+        has_one = initializer @ CustomError::Unauthorized
+    )]
+    pub escrow: Account<'info, Escrow>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -1057,6 +1184,7 @@ pub struct Escrow {
     pub mint_expected: Pubkey,
     pub amount_offered: u64,
     pub amount_expected: u64,
+    pub unlock_at: i64,
     pub is_fulfilled: bool,
     pub bump: u8,
 }
@@ -1096,4 +1224,7 @@ pub enum CustomError {
 
     #[msg("Insufficient reward vault balance")]
     InsufficientRewardVault,
+
+    #[msg("The escrow transaction has already been fulfilled")]
+    AlreadyFulfilled,
 }
