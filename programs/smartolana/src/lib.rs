@@ -5,13 +5,13 @@
  * context structs,
  * account structs
  */
-
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program_pack::Pack;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::state::Mint as SplMint;
 use anchor_spl::token::{
-    self, set_authority, spl_token, Burn, InitializeMint, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer
+    self, set_authority, spl_token, Burn, InitializeMint, Mint, MintTo, SetAuthority, Token,
+    TokenAccount, Transfer,
 };
 use spl_token::instruction::AuthorityType;
 
@@ -159,7 +159,10 @@ pub mod smartolana {
         deadline: i64,
     ) -> Result<()> {
         let clock = Clock::get()?;
-        require!(deadline > clock.unix_timestamp, CustomError::InvalidDeadline);
+        require!(
+            deadline > clock.unix_timestamp,
+            CustomError::InvalidDeadline
+        );
 
         let proposal = &mut ctx.accounts.proposal;
         proposal.id = proposal_id;
@@ -233,7 +236,12 @@ pub mod smartolana {
         let pool = &mut ctx.accounts.pool;
         pool.total_staked = pool.total_staked.checked_add(amount).unwrap();
 
-        msg!("Staked {} tokens at time {} into pool {}", amount, now, pool.id);
+        msg!(
+            "Staked {} tokens at time {} into pool {}",
+            amount,
+            now,
+            pool.id
+        );
         Ok(())
     }
 
@@ -241,21 +249,21 @@ pub mod smartolana {
         let stake_vault = &mut ctx.accounts.stake_vault;
         let now = Clock::get()?.unix_timestamp;
         let pool = &ctx.accounts.pool;
-    
+
         require!(
             now >= stake_vault.start_stake_time + pool.lock_period as i64,
             CustomError::StakeLocked
         );
-    
+
         let amount = stake_vault.amount;
         require!(amount > 0, CustomError::ZeroStake);
-    
+
         // Fix temporary borrow issue
         let user_key = ctx.accounts.user.key();
         let bump = ctx.bumps.stake_vault;
         let signer_seeds: &[&[u8]] = &[b"stake-vault", user_key.as_ref(), &[bump]];
         let signer: &[&[&[u8]]] = &[signer_seeds];
-    
+
         // Use already borrowed `stake_vault` here
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -266,12 +274,12 @@ pub mod smartolana {
             },
             signer,
         );
-    
+
         token::transfer(cpi_ctx, amount)?;
-    
+
         stake_vault.amount = 0;
         stake_vault.start_stake_time = 0;
-    
+
         msg!("Unstaked {} tokens at time {}", amount, now);
         Ok(())
     }
@@ -306,7 +314,7 @@ pub mod smartolana {
                 to: ctx.accounts.user_reward_ata.to_account_info(),
                 authority: ctx.accounts.mint_authority.to_account_info(),
             },
-            signer_seeds
+            signer_seeds,
         );
 
         token::mint_to(cpi_ctx, pending)?;
@@ -325,7 +333,13 @@ pub mod smartolana {
         Ok(())
     }
 
-    pub fn init_staking_pool(ctx: Context<InitStakingPool>, id: u64, name: String, reward_per_second: u64, lock_period: u64) -> Result<()> {
+    pub fn init_staking_pool(
+        ctx: Context<InitStakingPool>,
+        id: u64,
+        name: String,
+        reward_per_second: u64,
+        lock_period: u64,
+    ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         pool.id = id;
         pool.name = name;
@@ -369,7 +383,12 @@ pub mod smartolana {
         Ok(())
     }
 
-    pub fn update_pool_config(ctx: Context<UpdatePoolConfig>, new_rate: u64, new_lock_period: u64, pause: bool) -> Result<()> {
+    pub fn update_pool_config(
+        ctx: Context<UpdatePoolConfig>,
+        new_rate: u64,
+        new_lock_period: u64,
+        pause: bool,
+    ) -> Result<()> {
         let pool = &mut ctx.accounts.staking_pool;
 
         pool.reward_per_second = new_rate;
@@ -383,6 +402,45 @@ pub mod smartolana {
             pause
         );
 
+        Ok(())
+    }
+
+    pub fn init_escrow(
+        ctx: Context<InitEscrow>,
+        amount_offered: u64,
+        amount_expected: u64,
+    ) -> Result<()> {
+        let escrow = &mut ctx.accounts.escrow;
+    
+        // Transfer offered tokens from user to PDA vault
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.initializer_deposit_token_account.to_account_info(),
+                to: ctx.accounts.vault_amount.to_account_info(),
+                authority: ctx.accounts.initializer.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx, amount_offered)?;
+    
+        escrow.initializer = ctx.accounts.initializer.key();
+        escrow.initializer_deposit_token_account =
+            ctx.accounts.initializer_deposit_token_account.key();
+        escrow.vault_amount = ctx.accounts.vault_amount.key();
+        escrow.mint_offered = ctx.accounts.mint_offered.key();
+        escrow.mint_expected = ctx.accounts.mint_expected.key();
+        escrow.amount_offered = amount_offered;
+        escrow.amount_expected = amount_expected;
+        escrow.is_fulfilled = false;
+        escrow.bump = ctx.bumps.escrow;
+    
+        msg!(
+            "Escrow created: offering {} of mint {} expecting mint {}",
+            amount_offered,
+            escrow.mint_offered,
+            escrow.mint_expected
+        );
+    
         Ok(())
     }
     
@@ -725,7 +783,7 @@ pub struct UnstakeTokens<'info> {
         mut,
         constraint = stake_vault.pool == pool.key()
     )]
-    pub pool: Account<'info, StakingPool>,    
+    pub pool: Account<'info, StakingPool>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -837,7 +895,7 @@ pub struct RefillPool<'info> {
     )]
     pub pool: Account<'info, StakingPool>,
 
-    pub token_program: Program<'info, Token>
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
@@ -845,6 +903,55 @@ pub struct UpdatePoolConfig<'info> {
     #[account(mut, has_one = authority)]
     pub staking_pool: Account<'info, StakingPool>,
     pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitEscrow<'info> {
+    #[account(mut)]
+    pub initializer: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = initializer_deposit_token_account.owner == initializer.key(),
+        constraint = initializer_deposit_token_account.mint == mint_offered.key()
+    )]
+    pub initializer_deposit_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub mint_offered: Account<'info, Mint>,
+
+    #[account(mut)]
+    pub mint_expected: Account<'info, Mint>,
+
+    #[account(
+        init,
+        payer = initializer,
+        seeds = [b"escrow", initializer.key().as_ref()],
+        bump,
+        space = Escrow::LEN
+    )]
+    pub escrow: Account<'info, Escrow>,
+
+    // This vault account is PDA ATA that holds initializers offered tokens
+    #[account(
+        init,
+        payer = initializer,
+        associated_token::mint = mint_offered,
+        associated_token::authority = vault_authority
+    )]
+    pub vault_amount: Account<'info, TokenAccount>,
+
+    /// CHECK: PDA used to own vault_account
+    #[account(
+        seeds = [b"vault-authority", initializer.key().as_ref()],
+        bump
+    )]
+    pub vault_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 // ----------------- ACCOUNT STRUCTS ---------------------
@@ -876,12 +983,12 @@ impl ValidatorInfo {
 
 #[account]
 pub struct Proposal {
-    pub id: u64,  // unique per profile
-    pub profile: Pubkey, // creator profile pda
-    pub title: String,  // 4 + N
-    pub description: String,  // 4 + M
-    pub created_at: i64,  // UNIX timestamp
-    pub deadline: i64,  // voting end
+    pub id: u64,             // unique per profile
+    pub profile: Pubkey,     // creator profile pda
+    pub title: String,       // 4 + N
+    pub description: String, // 4 + M
+    pub created_at: i64,     // UNIX timestamp
+    pub deadline: i64,       // voting end
     pub yes_votes: u64,
     pub no_votes: u64,
     pub bump: u8,
@@ -906,14 +1013,14 @@ impl VoteRecord {
 
 #[account]
 pub struct StakeVault {
-    pub owner: Pubkey,  // 32 bytes
-    pub profile: Pubkey,  // 32 bytes
+    pub owner: Pubkey,   // 32 bytes
+    pub profile: Pubkey, // 32 bytes
     pub vault: Pubkey,
     pub pool: Pubkey,
-    pub amount: u64,  // 8 bytes
+    pub amount: u64,           // 8 bytes
     pub reward_collected: u64, // 8 bytes
-    pub start_stake_time: i64,  // 8 bytes
-    pub bump: u8,  // 1 byte
+    pub start_stake_time: i64, // 8 bytes
+    pub bump: u8,              // 1 byte
 }
 
 impl StakeVault {
@@ -939,6 +1046,24 @@ pub struct StakingPool {
 
 impl StakingPool {
     pub const LEN: usize = 8 + 8 + (4 + 32) + 32 + 32 + 32 + 8 + 8 + 8 + 32 + 1 + 1 + 1;
+}
+
+#[account]
+pub struct Escrow {
+    pub initializer: Pubkey,
+    pub initializer_deposit_token_account: Pubkey,
+    pub vault_amount: Pubkey,
+    pub mint_offered: Pubkey,
+    pub mint_expected: Pubkey,
+    pub amount_offered: u64,
+    pub amount_expected: u64,
+    pub is_fulfilled: bool,
+    pub bump: u8,
+}
+
+
+impl Escrow {
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1 + 1;
 }
 
 // ----------------- ERROR ---------------------
