@@ -9,6 +9,7 @@ import {
   createAssociatedTokenAccount,
   getAccount,
   mintTo,
+  transfer,
 } from "@solana/spl-token";
 
 describe("smartolana", () => {
@@ -760,6 +761,74 @@ describe("smartolana", () => {
     } catch (err: any) {
       expect(err.message).to.include("Account does not exist");
     }
+  });
+
+  it("Initializes an escrow account", async () => {
+    // Use the main user and global mint for both offered and expected
+    const amountOffered = new anchor.BN(1_000_000_000); // 1 token
+    const amountExpected = new anchor.BN(2_000_000_000); // 2 tokens (arbitrary)
+
+    if (!provider.wallet.payer) {
+      throw new Error("Wallet payer not available");
+    }
+
+    // Create ATA for user (or reuse existing)
+    const tempAtaAddr = await createAssociatedTokenAccount(
+      provider.connection,
+      provider.wallet.payer, // payer
+      mintPda,
+      user
+    );
+
+    // Transfer 1 token from validatorAta to user's ATA (simulate escrow funding)
+    await transfer(
+      provider.connection,
+      provider.wallet.payer, // payer (signer)
+      validatorAta,          // from
+      tempAtaAddr,           // to
+      user,                  // owner (signer)
+      amountOffered.toNumber()
+    );
+
+    // Derive escrow PDA and vault authority
+    const [escrowPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("escrow"), user.toBuffer()],
+      program.programId
+    );
+    const [vaultAuthPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault-authority"), user.toBuffer()],
+      program.programId
+    );
+    const vaultAta = getAssociatedTokenAddressSync(mintPda, vaultAuthPda, true);
+
+    // Call initEscrow
+    await program.methods
+      .initEscrow(amountOffered, amountExpected)
+      .accountsStrict({
+        initializer: user,
+        initializerDepositTokenAccount: tempAtaAddr,
+        mintOffered: mintPda,
+        mintExpected: mintPda,
+        escrow: escrowPda,
+        vaultAmount: vaultAta,
+        vaultAuthority: vaultAuthPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+
+    // Fetch and check escrow account
+    const escrowAccount = await program.account.escrow.fetch(escrowPda);
+    assert.strictEqual(escrowAccount.initializer.toBase58(), user.toBase58());
+    assert.strictEqual(escrowAccount.amountOffered.toString(), amountOffered.toString());
+    assert.strictEqual(escrowAccount.amountExpected.toString(), amountExpected.toString());
+    assert.strictEqual(escrowAccount.mintOffered.toBase58(), mintPda.toBase58());
+    assert.strictEqual(escrowAccount.mintExpected.toBase58(), mintPda.toBase58());
+    assert.strictEqual(escrowAccount.isFulfilled, false);
+    console.log("✅ Escrow created at:", escrowPda.toBase58());
+    console.log("• Vault ATA:", vaultAta.toBase58());
   });
 
   describe("❌ Negative Tests", () => {
