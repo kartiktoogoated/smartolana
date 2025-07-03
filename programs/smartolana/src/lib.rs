@@ -556,6 +556,71 @@ pub mod smartolana {
 
         Ok(())
     }
+
+    pub fn add_liquidity(ctx: Context<AddLiquidity>, amount_a: u64, amount_b: u64) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        let reserve_a = ctx.accounts.token_a_vault.amount;
+        let reserve_b = ctx.accounts.token_b_vault.amount;
+
+        let total_lp_supply = pool.total_lp_supply;
+
+        // Step 1 - Transfer user tokens into vaults
+        let cpi_ctx_a = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.user_token_a.to_account_info(),
+                to: ctx.accounts.token_a_vault.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx_a, amount_a)?;
+
+        // Step 2 - Transfer token B from user to vault
+        let cpi_ctx_b = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.user_token_b.to_account_info(),
+                to: ctx.accounts.token_b_vault.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx_b, amount_b)?;
+
+        // Step 3 - Calculate LP tokens to mint
+        let lp_to_mint = if total_lp_supply == 0 {
+            // Frist LP - gets sqrt(amount_a * amount_b)
+            integer_sqrt(amount_a.checked_mul(amount_b).unwrap())
+        } else {
+            let lp_from_a = amount_a * total_lp_supply / reserve_a;
+            let lp_from_b = amount_b * total_lp_supply / reserve_b;
+            lp_from_a.min(lp_from_b)
+        };
+
+        // Step 4 - Mint LP tokens to user using vault PDA as mint authority
+        let bump = ctx.bumps.vault_authority;
+        let pool_key = pool.key();
+        let signer_seeds: &[&[&[u8]]] = &[&[
+            b"vault-authority",
+            pool_key.as_ref(),
+            &[bump],
+        ]];
+
+        let cpi_ctx_mint = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            MintTo {
+                mint: ctx.accounts.lp_mint.to_account_info(),
+                to: ctx.accounts.user_lp_token_account.to_account_info(),
+                authority: ctx.accounts.vault_authority.to_account_info(),
+            },
+            signer_seeds
+        );
+        token::mint_to(cpi_ctx_mint, lp_to_mint)?;
+
+        // Step 5 - Update LP supply in pool
+        pool.total_lp_supply = pool.total_lp_supply.checked_add(lp_to_mint).unwrap();
+
+        Ok(())
+    }
     
 }
 
@@ -1166,6 +1231,39 @@ pub struct Swap<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+pub struct AddLiquidity<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(mut)]
+    pub user_token_a: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub user_token_b: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub user_lp_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub token_a_vault: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub token_b_vault: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub lp_mint: Account<'info, Mint>,
+
+    #[account(mut)]
+    pub pool: Account<'info, Pool>,
+
+    #[account(
+        seeds = [b"vault-authority", pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA for mint authority
+    pub vault_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -1286,11 +1384,12 @@ pub struct Pool {
     pub token_a_mint: Pubkey,
     pub token_b_mint: Pubkey,
     pub lp_mint: Pubkey,
+    pub total_lp_supply: u64,
     pub bump: u8,
 }
 
 impl Pool {
-    pub const LEN: usize = 8 + 32 + 32 + 32 +32 + 32 + 1;    
+    pub const LEN: usize = 8 + 32 + 32 + 32 +32 + 32 + 8 + 1;    
 }
 
 // ----------------- ERROR ---------------------
@@ -1329,4 +1428,9 @@ pub enum CustomError {
 
     #[msg("The tx cant happen due to slippage limits")]
     SlippageExceeded,
+}
+
+// Utitility fns
+fn integer_sqrt(value: u64) -> u64 {
+    (value as f64).sqrt() as u64
 }
