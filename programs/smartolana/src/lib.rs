@@ -621,6 +621,76 @@ pub mod smartolana {
 
         Ok(())
     }
+
+    pub fn remove_liquidity(ctx: Context<RemoveLiquidity>, lp_amount: u64) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        let reserve_a = ctx.accounts.token_a_vault.amount;
+        let reserve_b = ctx.accounts.token_b_vault.amount;
+
+        let total_lp_supply = pool.total_lp_supply;
+        require!(total_lp_supply > 0, CustomError::NoLiquidity);
+
+        // Calculate the share of tokens to return
+        let amount_a = lp_amount
+            .checked_mul(reserve_a)
+            .unwrap()
+            .checked_div(total_lp_supply)
+            .unwrap();
+
+        let amount_b = lp_amount
+            .checked_mul(reserve_b)
+            .unwrap()
+            .checked_div(total_lp_supply)
+            .unwrap();
+
+        // Step 1 - Burn LP tokens from user
+        let cpi_ctx_burn = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Burn {
+                mint: ctx.accounts.lp_mint.to_account_info(),
+                from: ctx.accounts.user_lp_token.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+        );
+        token::burn(cpi_ctx_burn, lp_amount)?;
+
+        // Step 2 - Transfer token A to user
+        let bump = ctx.bumps.vault_authority;
+        let pool_key = pool.key();
+        let signer_seeds: &[&[&[u8]]] = &[&[
+            b"vault-authority",
+            pool_key.as_ref(),
+            &[bump],
+        ]];
+
+        let cpi_ctx_a = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.token_a_vault.to_account_info(),
+                to: ctx.accounts.user_token_a.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+            signer_seeds,
+        );
+        token::transfer(cpi_ctx_a, amount_a)?;
+
+        // Step 3 - Transfer token B to user
+        let cpi_ctx_b = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.token_b_vault.to_account_info(),
+                to: ctx.accounts.user_token_b.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+            signer_seeds,
+        );
+        token::transfer(cpi_ctx_b, amount_b)?;
+
+        // Step 4 - Update LP supply
+        pool.total_lp_supply = pool.total_lp_supply.checked_sub(lp_amount).unwrap();
+
+        Ok(())
+    }
     
 }
 
@@ -1264,6 +1334,42 @@ pub struct AddLiquidity<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+pub struct RemoveLiquidity<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(mut)]
+    pub user_lp_token: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub user_token_a: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub user_token_b: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub token_a_vault: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub token_b_vault: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub lp_mint: Account<'info, Mint>,
+
+    #[account(mut)]
+    pub pool: Account<'info, Pool>,
+
+    #[account(
+        seeds = [b"vault-authority", pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA used as vault authority
+    pub vault_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -1428,6 +1534,9 @@ pub enum CustomError {
 
     #[msg("The tx cant happen due to slippage limits")]
     SlippageExceeded,
+    
+    #[msg("No liquidity is present")]
+    NoLiquidity,
 }
 
 // Utitility fns
