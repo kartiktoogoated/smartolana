@@ -1478,9 +1478,8 @@ pub struct Escrow {
     pub bump: u8,
 }
 
-
 impl Escrow {
-    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1 + 1;
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 1 + 1;
 }
 
 #[account]

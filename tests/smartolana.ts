@@ -767,28 +767,14 @@ describe("smartolana", () => {
     // Use the main user and global mint for both offered and expected
     const amountOffered = new anchor.BN(1_000_000_000); // 1 token
     const amountExpected = new anchor.BN(2_000_000_000); // 2 tokens (arbitrary)
+    const unlockAt = new anchor.BN(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
 
     if (!provider.wallet.payer) {
       throw new Error("Wallet payer not available");
     }
 
-    // Create ATA for user (or reuse existing)
-    const tempAtaAddr = await createAssociatedTokenAccount(
-      provider.connection,
-      provider.wallet.payer, // payer
-      mintPda,
-      user
-    );
-
-    // Transfer 1 token from validatorAta to user's ATA (simulate escrow funding)
-    await transfer(
-      provider.connection,
-      provider.wallet.payer, // payer (signer)
-      validatorAta,          // from
-      tempAtaAddr,           // to
-      user,                  // owner (signer)
-      amountOffered.toNumber()
-    );
+    // Use existing validator ATA instead of creating a new one
+    const tempAtaAddr = validatorAta; // Reuse existing validator ATA
 
     // Derive escrow PDA and vault authority
     const [escrowPda] = anchor.web3.PublicKey.findProgramAddressSync(
@@ -803,7 +789,7 @@ describe("smartolana", () => {
 
     // Call initEscrow
     await program.methods
-      .initEscrow(amountOffered, amountExpected)
+      .initEscrow(amountOffered, amountExpected, unlockAt)
       .accountsStrict({
         initializer: user,
         initializerDepositTokenAccount: tempAtaAddr,
@@ -819,6 +805,15 @@ describe("smartolana", () => {
       })
       .rpc();
 
+    // Wait a moment for transaction confirmation
+    await new Promise((r) => setTimeout(r, 1000));
+    
+    // Check if escrow account exists
+    const escrowAccountInfo = await provider.connection.getAccountInfo(escrowPda);
+    if (!escrowAccountInfo) {
+      throw new Error("Escrow account was not created");
+    }
+    
     // Fetch and check escrow account
     const escrowAccount = await program.account.escrow.fetch(escrowPda);
     assert.strictEqual(escrowAccount.initializer.toBase58(), user.toBase58());
