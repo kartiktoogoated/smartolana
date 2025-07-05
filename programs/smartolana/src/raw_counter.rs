@@ -32,7 +32,7 @@ fn process_instruction(
 ) -> ProgramResult {
     let instruction = MyInstruction::try_from_slice(instruction_data)?;
 
-    match Instruction {
+    match instruction {
         MyInstruction::Initialize => handle_initialize(accounts, program_id),
         MyInstruction::Increment => handle_increment(accounts, program_id),
     }
