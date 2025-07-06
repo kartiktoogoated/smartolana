@@ -23,6 +23,8 @@ It signals to Anchor the account is an executable one, i.e. a program, and you m
 The one we have been using is the system program, though later we will use our own programs.
  */
 pub mod smartolana {
+    use anchor_lang::accounts;
+
     use super::*;
 
     pub fn init_profile(ctx: Context<InitProfile>, name: String) -> Result<()> {
@@ -716,6 +718,59 @@ pub mod smartolana {
 
         Ok(())
     }
+
+    pub fn propose_transaction(
+        ctx: Context<ProposeTransaction>,
+        program_id: Pubkey,
+        accounts: Vec<TransactionAccount>,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let multisig = &ctx.accounts.multisig;
+        let proposer = &ctx.accounts.proposer;
+
+        // Validator proposer is an owner
+        require!(
+            multisig.owners.contains(&proposer.key()),
+            CustomError::NotAnOwner
+        );
+
+        // Populate transaction
+        let tx = &mut ctx.accounts.tx;
+        tx.multisig = multisig.key();
+        tx.program_id = program_id;
+        tx.accounts = accounts;
+        tx.data = data;
+        tx.did_execute = false;
+        tx.signers = [false; 10];
+
+        // Mark the propose as approved
+        if let Some(index) = multisig.owners.iter().position(|k| k == &proposer.key()) {
+            tx.signers[index] = true;
+        } else {
+            return Err(CustomError::NotAnOwner.into());
+        }
+        tx.owner_set_seqno = multisig.owner_set_seqno;
+
+        Ok(())
+    }
+
+    pub fn approve_transaction(ctx: Context<ApproveTransaction>) -> Result<()> {
+        let multisig = &ctx.accounts.multisig;
+        let signer = &ctx.accounts.signer;
+        let tx = &mut ctx.accounts.tx;
+
+        // Check signer is one of the owners
+        if let Some(index) = multisig.owners.iter().position(|k| k == &signer.key()) {
+            // Ensure signer hasnt already signed
+            require!(!tx.signers[index], CustomError::AlreadySigned);
+
+            tx.signers[index] = true;
+            Ok(())
+        } else {
+            Err(CustomError::NotAnOwner.into())
+        }
+    }
+
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -1412,6 +1467,50 @@ pub struct CreateMultisig<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+#[instruction(tx_nonce: u8)]
+pub struct ProposeTransaction<'info> {
+    #[account(mut)]
+    pub proposer: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"multisig", proposer.key().as_ref()],
+        bump
+    )]
+    pub multisig: Account<'info, Multisig>,
+
+    #[account(
+        init,
+        payer = proposer,
+        space = Transaction::LEN,
+        seeds = [b"tx", multisig.key().as_ref(), &[tx_nonce]],
+        bump
+    )]
+    pub tx: Account<'info, Transaction>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ApproveTransaction<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+
+    #[account(
+        seeds = [b"multisig", signer.key().as_ref()],
+        bump
+    )]
+    pub multisig: Account<'info, Multisig>,
+
+    #[account(
+        mut,
+        seeds = [b"tx", multisig.key().as_ref()],
+        bump,
+        constraint = !tx.did_execute @ CustomError::AlreadyExecuted
+    )]
+    pub tx: Account<'info, Transaction>,
+}
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -1550,7 +1649,38 @@ pub struct Multisig {
 impl Multisig {
     pub const MAX_OWNERS: usize = 10;
 
-    pub const LEN: usize = 8 + 4 + (32 * Self::MAX_OWNERS) + 1 + 1 + 4; 
+    pub const LEN: usize = 8 + 4 + (32 * Self::MAX_OWNERS) + 1 + 1 + 4;
+}
+
+#[account]
+pub struct Transaction {
+    pub multisig: Pubkey,
+    pub program_id: Pubkey,
+    pub accounts: Vec<TransactionAccount>,
+    pub data: Vec<u8>,
+    pub did_execute: bool,
+    pub signers: [bool; 10],
+    pub owner_set_repo: u64,
+    pub owner_set_seqno: u32,
+}
+
+impl Transaction {
+    pub const MAX_ACCOUNTS: usize = 10;
+    pub const MAX_DATA: usize = 512;
+
+    pub const LEN: usize = 8 + 32 + 32 + 4 + TransactionAccount::LEN * Self::MAX_ACCOUNTS + 4 + Self::MAX_DATA + 1 + 10 + 4;
+}
+
+// Anchor doesn’t allow serializing raw AccountMeta
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct TransactionAccount {
+    pub pubkey: Pubkey,
+    pub is_signer: bool,
+    pub is_writable: bool,
+}
+
+impl TransactionAccount {
+    pub const LEN: usize = 32 + 1 + 1;
 }
 
 // ----------------- ERROR ---------------------
@@ -1598,6 +1728,18 @@ pub enum CustomError {
 
     #[msg("Invalid threshold. Must be greater than 0 and less than or equal to number of owners.")]
     InvalidThreshold,
+
+    #[msg("Only a multisig owner can propose a transaction")]
+    NotAnOwner,
+
+    #[msg("Transaction already signed by this owner")]
+    AlreadySigned,
+
+    #[msg("Transaction already executed")]
+    AlreadyExecuted,
+
+    #[msg("Not enough signatures to execute this transaction")]
+    InsufficientSignatures,
 }
 
 // Utitility fns
