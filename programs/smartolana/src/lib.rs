@@ -412,7 +412,10 @@ pub mod smartolana {
         unlock_at: i64,
     ) -> Result<()> {
         let clock = Clock::get()?;
-        require!(unlock_at > clock.unix_timestamp, CustomError::InvalidDeadline);
+        require!(
+            unlock_at > clock.unix_timestamp,
+            CustomError::InvalidDeadline
+        );
 
         let escrow = &mut ctx.accounts.escrow;
 
@@ -420,7 +423,10 @@ pub mod smartolana {
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
-                from: ctx.accounts.initializer_deposit_token_account.to_account_info(),
+                from: ctx
+                    .accounts
+                    .initializer_deposit_token_account
+                    .to_account_info(),
                 to: ctx.accounts.vault_amount.to_account_info(),
                 authority: ctx.accounts.initializer.to_account_info(),
             },
@@ -428,16 +434,16 @@ pub mod smartolana {
         token::transfer(cpi_ctx, amount_offered)?;
 
         escrow.initializer = ctx.accounts.initializer.key();
-        escrow.initializer_deposit_token_account = ctx.accounts.initializer_deposit_token_account.key();
+        escrow.initializer_deposit_token_account =
+            ctx.accounts.initializer_deposit_token_account.key();
         escrow.vault_amount = ctx.accounts.vault_amount.key();
         escrow.mint_offered = ctx.accounts.mint_offered.key();
         escrow.mint_expected = ctx.accounts.mint_expected.key();
         escrow.amount_offered = amount_offered;
         escrow.amount_expected = amount_expected;
-        escrow.unlock_at = unlock_at; 
+        escrow.unlock_at = unlock_at;
         escrow.is_fulfilled = false;
         escrow.bump = ctx.bumps.escrow;
-
 
         Ok(())
     }
@@ -447,7 +453,10 @@ pub mod smartolana {
         let escrow = &mut ctx.accounts.escrow;
 
         require!(!escrow.is_fulfilled, CustomError::AlreadyFulfilled);
-        require!(clock.unix_timestamp >= escrow.unlock_at, CustomError::StakeLocked);
+        require!(
+            clock.unix_timestamp >= escrow.unlock_at,
+            CustomError::StakeLocked
+        );
 
         // Transfer expected tokens from taker -> initializer
         let pay_initializer_ctx = CpiContext::new(
@@ -462,8 +471,8 @@ pub mod smartolana {
 
         // Transfer offered tokens from vault -> taker
         let bump = ctx.bumps.vault_authority;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault-authority", escrow.initializer.as_ref(), &[bump]]];
-
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"vault-authority", escrow.initializer.as_ref(), &[bump]]];
 
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -485,11 +494,15 @@ pub mod smartolana {
         let escrow = &mut ctx.accounts.escrow;
 
         require!(!escrow.is_fulfilled, CustomError::AlreadyFulfilled);
-        require!(ctx.accounts.initializer.key() == escrow.initializer, CustomError::Unauthorized);
+        require!(
+            ctx.accounts.initializer.key() == escrow.initializer,
+            CustomError::Unauthorized
+        );
 
         // Return locked tokens back to initializer
         let bump = ctx.bumps.vault_authority;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault-authority", escrow.initializer.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"vault-authority", escrow.initializer.as_ref(), &[bump]]];
 
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -536,12 +549,8 @@ pub mod smartolana {
         let bump = ctx.bumps.vault_authority;
         let pool_key = pool.key();
         let token_out_key = ctx.accounts.token_out.key();
-        let signer_seeds: &[&[&[u8]]] = &[&[
-            b"vault",
-            pool_key.as_ref(),
-            token_out_key.as_ref(),
-            &[bump],
-        ]];
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"vault", pool_key.as_ref(), token_out_key.as_ref(), &[bump]]];
 
         let cpi_ctx_out = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -599,11 +608,7 @@ pub mod smartolana {
         // Step 4 - Mint LP tokens to user using vault PDA as mint authority
         let bump = ctx.bumps.vault_authority;
         let pool_key = pool.key();
-        let signer_seeds: &[&[&[u8]]] = &[&[
-            b"vault-authority",
-            pool_key.as_ref(),
-            &[bump],
-        ]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault-authority", pool_key.as_ref(), &[bump]]];
 
         let cpi_ctx_mint = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -612,7 +617,7 @@ pub mod smartolana {
                 to: ctx.accounts.user_lp_token_account.to_account_info(),
                 authority: ctx.accounts.vault_authority.to_account_info(),
             },
-            signer_seeds
+            signer_seeds,
         );
         token::mint_to(cpi_ctx_mint, lp_to_mint)?;
 
@@ -657,11 +662,7 @@ pub mod smartolana {
         // Step 2 - Transfer token A to user
         let bump = ctx.bumps.vault_authority;
         let pool_key = pool.key();
-        let signer_seeds: &[&[&[u8]]] = &[&[
-            b"vault-authority",
-            pool_key.as_ref(),
-            &[bump],
-        ]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault-authority", pool_key.as_ref(), &[bump]]];
 
         let cpi_ctx_a = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -691,7 +692,30 @@ pub mod smartolana {
 
         Ok(())
     }
-    
+
+    pub fn create_multisig(
+        ctx: Context<CreateMultisig>,
+        owners: Vec<Pubkey>,
+        threshold: u8,
+    ) -> Result<()> {
+        require!(
+            owners.len() <= Multisig::MAX_OWNERS,
+            CustomError::TooManyOwners
+        );
+        require!(
+            threshold > 0 && threshold <= owners.len() as u8,
+            CustomError::InvalidThreshold
+        );
+
+        let multisig = &mut ctx.accounts.multisig;
+
+        multisig.owners = owners;
+        multisig.threshold = threshold;
+        multisig.bump = ctx.bumps.multisig;
+        multisig.owner_set_seqno = 0;
+
+        Ok(())
+    }
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -1272,7 +1296,7 @@ pub struct CancelEscrow<'info> {
 pub struct Swap<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
-    
+
     #[account(mut)]
     pub user_in_ata: Account<'info, TokenAccount>,
 
@@ -1293,7 +1317,7 @@ pub struct Swap<'info> {
     pub vault_authority: UncheckedAccount<'info>,
 
     #[account(mut)]
-    pub token_out: Account<'info, Mint>,  // Used only for PDA seed
+    pub token_out: Account<'info, Mint>, // Used only for PDA seed
 
     #[account(mut)]
     pub pool: Account<'info, Pool>,
@@ -1368,6 +1392,24 @@ pub struct RemoveLiquidity<'info> {
     pub vault_authority: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+#[instruction(owners: Vec<Pubkey>)]
+pub struct CreateMultisig<'info> {
+    #[account(
+        init,
+        seeds = [b"multisig", payer.key().as_ref()],
+        bump,
+        payer = payer,
+        space = Multisig::LEN
+    )]
+    pub multisig: Account<'info, Multisig>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 // ----------------- ACCOUNT STRUCTS ---------------------
@@ -1494,7 +1536,21 @@ pub struct Pool {
 }
 
 impl Pool {
-    pub const LEN: usize = 8 + 32 + 32 + 32 +32 + 32 + 8 + 1;    
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 32 + 8 + 1;
+}
+
+#[account]
+pub struct Multisig {
+    pub owners: Vec<Pubkey>,  // List of valid signers
+    pub threshold: u8,        // Min approvals required
+    pub bump: u8,             // PDA bump for vault authority
+    pub owner_set_seqno: u32, // Tracks changes to owner set
+}
+
+impl Multisig {
+    pub const MAX_OWNERS: usize = 10;
+
+    pub const LEN: usize = 8 + 4 + (32 * Self::MAX_OWNERS) + 1 + 1 + 4; 
 }
 
 // ----------------- ERROR ---------------------
@@ -1533,9 +1589,15 @@ pub enum CustomError {
 
     #[msg("The tx cant happen due to slippage limits")]
     SlippageExceeded,
-    
+
     #[msg("No liquidity is present")]
     NoLiquidity,
+
+    #[msg("Too many owners. The maximum number of owners allowed in a multisig is 10.")]
+    TooManyOwners,
+
+    #[msg("Invalid threshold. Must be greater than 0 and less than or equal to number of owners.")]
+    InvalidThreshold,
 }
 
 // Utitility fns
