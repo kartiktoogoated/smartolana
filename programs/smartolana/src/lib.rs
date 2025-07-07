@@ -771,6 +771,49 @@ pub mod smartolana {
         }
     }
 
+    pub fn execute_transaction(ctx: Context<ExecuteTransaction>) -> Result<()> {
+        let tx = &mut ctx.accounts.tx;
+        let multisig = &ctx.accounts.multisig;
+
+        // Count how many owners signed
+        let sig_count = tx
+            .signers
+            .iter()
+            .zip(multisig.owners.iter())
+            .filter(|(signed, _)| **signed)
+            .count();
+
+        // Ensure enough approvals
+        require!(
+            sig_count >= multisig.threshold as usize,
+            CustomError::InsufficientSignatures
+        );
+
+        // Mark tx as executed
+        tx.did_execute = true;
+
+        // CPI to the intended program
+        let account_infos: Vec<AccountInfo> = ctx.remaining_accounts.to_vec();
+
+        let ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: tx.program_id,
+            accounts: tx
+                .accounts
+                .iter()
+                .map(|acc| anchor_lang::solana_program::instruction::AccountMeta {
+                    pubkey: acc.pubkey,
+                    is_signer: acc.is_signer,
+                    is_writable: acc.is_writable,
+                })
+                .collect(),
+            data: tx.data.clone(),
+        };
+
+        anchor_lang::solana_program::program::invoke(&ix, &account_infos)?;
+
+        Ok(())
+    }
+
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -1511,6 +1554,29 @@ pub struct ApproveTransaction<'info> {
     )]
     pub tx: Account<'info, Transaction>,
 }
+
+#[derive(Accounts)]
+#[instruction(tx_nonce: u8)]
+pub struct ExecuteTransaction<'info> {
+    #[account(mut)]
+    pub executor: Signer<'info>,
+
+    #[account(
+        seeds = [b"multisig", executor.key().as_ref()],
+        bump
+    )]
+    pub multisig: Account<'info, Multisig>,
+
+    #[account(
+        mut,
+        seeds = [b"tx", multisig.key().as_ref(), &[tx_nonce]],
+        bump,
+        constraint = !tx.did_execute @ CustomError::AlreadyExecuted,
+        constraint = tx.multisig == multisig.key() @ CustomError::Unauthorized,
+    )]
+    pub tx: Account<'info, Transaction>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
