@@ -823,6 +823,34 @@ pub mod smartolana {
         Ok(())
     }
 
+    pub fn init_pool_clmm(ctx: Context<InitPoolClmm>, sqrt_price_x64: u128, current_tick: i32, tick_spacing: u16, fee_rate: u16) -> Result<()> {
+        let pool = &mut ctx.accounts.pool_clmm;
+
+        pool.token_a_mint = ctx.accounts.token_a_mint.key();
+        pool.token_b_mint = ctx.accounts.token_b_mint.key();
+        pool.vault_a = ctx.accounts.vault_a.key();
+        pool.vault_b = ctx.accounts.vault_b.key();
+
+        pool.sqrt_price_x64 = sqrt_price_x64;
+        pool.current_tick = current_tick;
+        pool.tick_spacing = tick_spacing;
+        pool.liquidity = 0;
+        pool.fee_rate = fee_rate;
+
+        pool.bump = ctx.bumps.pool_clmm;
+        pool.signer_bump = ctx.bumps.pool_signer;
+
+        Ok(())
+    }
+
+    pub fn init_tick(ctx: Context<InitTick>, tick_index: i32) -> Result<()> {
+        let tick = &mut ctx.accounts.tick;
+        tick.tick_index = tick_index;
+        tick.liquidity_net = 0;
+        tick.fee_growth_outside_a = 0;
+        tick.fee_growth_outside_b = 0;
+        Ok(())
+    }
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -1586,6 +1614,77 @@ pub struct ExecuteTransaction<'info> {
     pub tx: Account<'info, Transaction>,
 }
 
+#[derive(Accounts)]
+#[instruction(tick_spacing: u16)]
+pub struct InitPoolClmm<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// Pool state account (PDA)
+    #[account(
+        init,
+        payer = payer,
+        seeds = [b"pool-clmm", token_a_mint.key().as_ref(), token_b_mint.key().as_ref()],
+        bump,
+        space = PoolClmm::LEN
+    )]
+    pub pool_clmm: Account<'info, PoolClmm>, 
+
+    /// Token A and B mints
+    pub token_a_mint: Account<'info, Mint>,
+    pub token_b_mint: Account<'info, Mint>,
+
+    /// Vaults to hold A/B liquidity
+    #[account(
+        init,
+        payer = payer,
+        token::mint = token_a_mint,
+        token::authority = pool_signer
+    )]
+    pub vault_a: Account<'info, TokenAccount>,
+
+    #[account(
+        init,
+        payer = payer,
+        token::mint = token_b_mint,
+        token::authority = pool_signer
+    )]
+    pub vault_b: Account<'info, TokenAccount>,
+
+    /// PDA that signs for the vaults
+    #[account(
+        seeds = [b"signer", pool_clmm.key().as_ref()],
+        bump
+    )]
+    /// CHECK: Used only as a PDA signer
+    pub pool_signer: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+#[instruction(tick_index: i32)]
+pub struct InitTick<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// The CLMM pool this tick belongs to
+    pub pool_clmm: Account<'info, PoolClmm>,
+    
+    #[account(
+        init,
+        payer = payer,
+        seeds = [b"tick", pool_clmm.key().as_ref(), &tick_index.to_le_bytes()],
+        bump,
+        space = Tick::LEN
+    )]
+    pub tick: Account<'info, Tick>,
+
+    pub system_program: Program<'info, System>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -1756,6 +1855,40 @@ pub struct TransactionAccount {
 
 impl TransactionAccount {
     pub const LEN: usize = 32 + 1 + 1;
+}
+
+#[account]
+pub struct PoolClmm {
+    pub token_a_mint: Pubkey,
+    pub token_b_mint: Pubkey,
+    pub vault_a: Pubkey,
+    pub vault_b: Pubkey,
+
+    pub sqrt_price_x64: u128,  // sqrt(p), stored in fixed-point 
+    pub current_tick: i32,
+    pub tick_spacing: u16,
+
+    pub liquidity: u128,      // active liquidity at current tick
+    pub fee_rate: u16,        // eg 30 = 0.3%
+
+    pub bump: u8,
+    pub signer_bump: u8,
+}
+
+impl PoolClmm {
+    pub const LEN: usize = 8 + 32 * 4 + 16 + 4 + 2 + 16 + 2 + 1 + 1;
+}
+
+#[account]
+pub struct Tick {
+    pub tick_index: i32,      // This ticks the index (-200, 0 , 100)
+    pub liquidity_net: i128,  // +liquidity if lower_tick, -liquidity if upper_tick
+    pub fee_growth_outside_a: u128,
+    pub fee_growth_outside_b: u128,
+}
+
+impl Tick {
+    pub const LEN: usize = 8 + 4 + 16 * 3;
 }
 
 // ----------------- ERROR ---------------------
