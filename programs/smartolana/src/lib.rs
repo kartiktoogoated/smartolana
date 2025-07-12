@@ -866,16 +866,18 @@ pub mod smartolana {
         Ok(())
     }
 
-    pub fn open_position(ctx: Context<OpenPosition>, liquidity: u128, tick_lower: i32, tick_upper: i32) -> Result<()> {
+    pub fn open_position(
+        ctx: Context<OpenPosition>,
+        liquidity: u128,
+        tick_lower: i32,
+        tick_upper: i32,
+    ) -> Result<()> {
         let pool = &mut ctx.accounts.pool_clmm;
         let tick_lower_account = &mut ctx.accounts.tick_lower;
         let tick_upper_account = &mut ctx.accounts.tick_upper;
 
         // Validate
-        require!(
-            tick_lower < tick_upper,
-            CustomError::InvalidTickRange
-        );
+        require!(tick_lower < tick_upper, CustomError::InvalidTickRange);
         require!(liquidity > 0, CustomError::ZeroLiquidity);
 
         // Update ticks
@@ -1063,55 +1065,99 @@ pub mod smartolana {
         Ok(())
     }
 
-    pub fn swap_clmm(ctx: Context<SwapClmm>, amount_in: u64, min_amount_out: u64, a_to_b: bool) -> Result<()> {
+    pub fn swap_clmm(
+        ctx: Context<SwapClmm>,
+        amount_in: u64,
+        min_amount_out: u64,
+        a_to_b: bool,
+    ) -> Result<()> {
         let pool = &mut ctx.accounts.pool_clmm;
 
-        // Fee Calc (Placeholder right now)
-        let amount_in_after_fee = amount_in * (10_000 - pool.fee_rate as u64);
-        
-        // Token logic (simplified)
-        let amount_out = amount_in_after_fee; // Pretending 1:1 for now
+        // Fee handlding
+        let fee_rate = pool.fee_rate as u64;
+        let fee_amount = amount_in
+            .checked_mul(fee_rate)
+            .unwrap()
+            .checked_div(10_000)
+            .unwrap();
 
-           // 1. Transfer token from user to vault
-    let cpi_ctx_in = CpiContext::new(
-        ctx.accounts.token_program.to_account_info(),
-        Transfer {
-            from: ctx.accounts.user_source_token.to_account_info(),
-            to: ctx.accounts.vault_source.to_account_info(),
-            authority: ctx.accounts.user.to_account_info(),
-        },
-    );
-    token::transfer(cpi_ctx_in, amount_in)?;
+        let amount_in_after_fee = amount_in.checked_sub(fee_amount).unwrap();
+        let amount_out = amount_in_after_fee; // 1:1 for now
 
-    // 2. Transfer token from vault to user
-    let pool_key = pool.key();
-    let signer_seeds: &[&[&[u8]]] = &[&[b"signer", pool_key.as_ref(), &[pool.signer_bump]]];
+        // Fee growth update
+        if pool.liquidity > 0 {
+            let fee_growth = ((fee_amount as u128) << 64) / pool.liquidity;
+            if a_to_b {
+                pool.fee_growth_global_a =
+                    pool.fee_growth_global_a.checked_add(fee_growth).unwrap();
+            } else {
+                pool.fee_growth_global_b =
+                    pool.fee_growth_global_b.checked_add(fee_growth).unwrap();
+            }
+        }
+        // --- Token Transfer In: From User → Vault ---
+        let cpi_ctx_in = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.user_source_token.to_account_info(),
+                to: ctx.accounts.vault_source.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx_in, amount_in)?;
 
-    let cpi_ctx_out = CpiContext::new_with_signer(
-        ctx.accounts.token_program.to_account_info(),
-        Transfer {
-            from: ctx.accounts.vault_destination.to_account_info(),
-            to: ctx.accounts.user_destination_token.to_account_info(),
-            authority: ctx.accounts.pool_signer.to_account_info(),
-        },
-        signer_seeds,
-    );
-    token::transfer(cpi_ctx_out, amount_out)?;
+        // --- Token Transfer Out: From Vault → User (Signer PDA) ---
+        let pool_key = pool.key();
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"signer", pool_key.as_ref(), &[ctx.bumps.pool_signer]]];
 
-    // 3. Placeholder: Update sqrt price / tick if needed (skip for now)
+        let cpi_ctx_out = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.vault_destination.to_account_info(),
+                to: ctx.accounts.user_destination_token.to_account_info(),
+                authority: ctx.accounts.pool_signer.to_account_info(),
+            },
+            signer_seeds,
+        );
+        token::transfer(cpi_ctx_out, amount_out)?;
 
-    require!(amount_out >= min_amount_out, CustomError::SlippageExceeded);
-    msg!(
-        "Swapped {} (A→B: {}) → {}, with {} fee",
-        amount_in,
-        a_to_b,
-        amount_out,
-        amount_in - amount_in_after_fee
-    );
+        // --- Validation ---
+        require!(amount_out >= min_amount_out, CustomError::SlippageExceeded);
 
-    Ok(())
-}
+        msg!(
+            "Swapped {} (A→B: {}) → {}, fee: {}",
+            amount_in,
+            a_to_b,
+            amount_out,
+            fee_amount
+        );
 
+        Ok(())
+    }
+
+    pub fn close_position(
+        ctx: Context<ClosePosition>,
+        tick_lower: i32,
+        tick_upper: i32,
+    ) -> Result<()> {
+        let user_position = &ctx.accounts.user_position;
+
+        // Only allow closing if all liquidity is removed
+        require!(
+            user_position.liquidity == 0,
+            CustomError::PositionStillHasLiquidity
+        );
+
+        msg!(
+            "Position closed for user: {} | tick range: [{} - {}]",
+            ctx.accounts.owner.key(),
+            tick_lower,
+            tick_upper
+        );
+
+        Ok(())
+    }
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -2160,6 +2206,35 @@ pub struct SwapClmm<'info> {
 
     pub token_program: Program<'info, Token>,
 }
+
+#[derive(Accounts)]
+#[instruction(tick_lower: i32, tick_upper: i32)]
+pub struct ClosePosition<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    /// Pool the position belongs to
+    #[account(mut)]
+    pub pool_clmm: Account<'info, PoolClmm>,
+
+    /// Users position to close
+    #[account(
+        mut,
+        close = owner,
+        seeds = [
+            b"position",
+            owner.key().as_ref(),
+            pool_clmm.key().as_ref(),
+            &tick_lower.to_le_bytes(),
+            &tick_upper.to_le_bytes()
+        ],
+        bump,
+        has_one = owner,
+        has_one = pool_clmm
+    )]
+    pub user_position: Account<'info, Position>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -2355,8 +2430,8 @@ pub struct PoolClmm {
     pub liquidity: u128, // active liquidity at current tick
     pub fee_rate: u16,   // eg 30 = 0.3%
 
-    pub fee_growth_global_a: u128, 
-    pub fee_growth_global_b: u128, 
+    pub fee_growth_global_a: u128,
+    pub fee_growth_global_b: u128,
 
     pub bump: u8,
     pub signer_bump: u8,
@@ -2376,7 +2451,7 @@ impl PoolClmm {
         16 + // fee_growth_global_a
         16 + // fee_growth_global_b
         1  + // bump
-        1;   // signer_bump
+        1; // signer_bump
 }
 
 #[account]
@@ -2392,7 +2467,7 @@ impl Tick {
         4 +  // tick_index (i32)
         16 + // liquidity_net (i128)
         16 + // fee_growth_outside_a (u128)
-        16;  // fee_growth_outside_b (u128)
+        16; // fee_growth_outside_b (u128)
 }
 
 #[account]
@@ -2414,7 +2489,7 @@ impl Position {
         4 +  // tick_upper
         16 + // liquidity
         16 + // fee_growth_checkpoint_a
-        16;  // fee_growth_checkpoint_b
+        16; // fee_growth_checkpoint_b
 }
 
 // ----------------- ERROR ---------------------
@@ -2483,6 +2558,9 @@ pub enum CustomError {
 
     #[msg("Insufficient liquidity to remove")]
     InvalidLiquidityAmount,
+
+    #[msg("Liquidity is still present in the pool")]
+    PositionStillHasLiquidity,
 }
 
 // Utitility fns
@@ -2490,3 +2568,13 @@ fn integer_sqrt(value: u64) -> u64 {
     (value as f64).sqrt() as u64
 }
 
+fn update_fee_growth_global(pool: &mut Account<PoolClmm>, fee_amount_a: u64, fee_amount_b: u64) {
+    if pool.liquidity > 0 {
+        let fee_growth_a = (fee_amount_a as u128) << 64 / pool.liquidity;
+        let fee_growth_b = (fee_amount_b as u128) << 64 / pool.liquidity;
+
+        pool.fee_growth_global_a = pool.fee_growth_global_a.checked_add(fee_growth_a).unwrap();
+
+        pool.fee_growth_global_b = pool.fee_growth_global_b.checked_add(fee_growth_b).unwrap();
+    }
+}
