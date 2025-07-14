@@ -1158,6 +1158,58 @@ pub mod smartolana {
 
         Ok(())
     }
+
+    pub fn collect_protocol_fees(ctx: Context<CollectProtocolFees>) -> Result<()> {
+        let pool = &mut ctx.accounts.pool_clmm;
+
+        let fee_a = pool.protocol_fee_a;
+        let fee_b = pool.protocol_fee_b;
+
+        require!(fee_a > 0 || fee_b > 0, CustomError::NoProtocolFeesToCollect);
+
+        let pool_key = pool.key();
+        let signer_seeds: &[&[&[u8]]] = &[&[
+            b"signer",
+            pool_key.as_ref(),
+            &[pool.signer_bump]
+        ]];
+
+        // Transfer token A protocol fee
+        if fee_a > 0 {
+            let cpi_ctx_a = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.vault_a.to_account_info(),
+                    to: ctx.accounts.protocol_fee_recipient_a.to_account_info(),
+                    authority: ctx.accounts.pool_signer.to_account_info(),
+                },
+                signer_seeds,
+            );
+            token::transfer(cpi_ctx_a, fee_a)?;
+        }
+
+        // Transfer token B protocol fee
+        if fee_b > 0 {
+            let cpi_ctx_b = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.vault_b.to_account_info(),
+                    to: ctx.accounts.protocol_fee_recipient_b.to_account_info(),
+                    authority: ctx.accounts.pool_signer.to_account_info(),
+                },
+                signer_seeds
+            );
+            token::transfer(cpi_ctx_b, fee_b)?;
+        }
+
+            // Reset protocol fees after collection
+            pool.protocol_fee_a = 0;
+            pool.protocol_fee_b = 0;
+
+            msg!("Protocol fees collected: {} A, {} B", fee_a, fee_b);
+
+        Ok(())
+    }
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
@@ -2235,6 +2287,39 @@ pub struct ClosePosition<'info> {
     pub user_position: Account<'info, Position>,
 }
 
+#[derive(Accounts)]
+pub struct CollectProtocolFees<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        mut,
+        has_one = vault_a,
+        has_one = vault_b,
+        has_one = authority
+    )]
+    pub pool_clmm: Account<'info, PoolClmm>,
+
+    #[account(mut)]
+    pub vault_a: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub vault_b: Account<'info, TokenAccount>,
+
+    #[account(
+        seeds = [b"signer", pool_clmm.key().as_ref()],
+        bump = pool_clmm.signer_bump
+    )]
+    /// CHECK: PDA signer for vault auth
+    pub pool_signer: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub protocol_fee_recipient_a: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub protocol_fee_recipient_b: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 // ----------------- ACCOUNT STRUCTS ---------------------
 
 #[account]
@@ -2433,6 +2518,10 @@ pub struct PoolClmm {
     pub fee_growth_global_a: u128,
     pub fee_growth_global_b: u128,
 
+    pub protocol_fee_a: u64,
+    pub protocol_fee_b: u64,
+
+    pub authority: Pubkey,
     pub bump: u8,
     pub signer_bump: u8,
 }
@@ -2450,6 +2539,9 @@ impl PoolClmm {
         2  + // fee_rate
         16 + // fee_growth_global_a
         16 + // fee_growth_global_b
+        8  + // protocol fee
+        8  + // protocol fee
+        32 + // authority
         1  + // bump
         1; // signer_bump
 }
@@ -2561,6 +2653,9 @@ pub enum CustomError {
 
     #[msg("Liquidity is still present in the pool")]
     PositionStillHasLiquidity,
+
+    #[msg("No protocol fees available for collection")]
+    NoProtocolFeesToCollect,
 }
 
 // Utitility fns
