@@ -14,6 +14,7 @@ use anchor_spl::token::{
     TokenAccount, Transfer,
 };
 use spl_token::instruction::AuthorityType;
+use anchor_spl::associated_token::{self, Create};
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
@@ -1210,10 +1211,47 @@ pub mod smartolana {
 
         Ok(())
     }
+
+    pub fn handle_buy_nft(
+        ctx: Context<BuyNft>,
+    ) -> Result<()> {
+        let ata = associated_token::get_associated_token_address(
+            &ctx.accounts.buyer_authority.key(),
+            &ctx.accounts.nft_mint.key());
+        require!(ata == ctx.accounts.buyer_nft_account.key(), CustomError::AlreadyExecuted);
+    
+        if ctx.accounts.buyer_nft_account.data_len() == 0{
+            //create buyer nft token account
+            associated_token::create(CpiContext::new(ctx.accounts.associated_token_program.to_account_info(),
+            associated_token:: Create{
+                    payer: ctx.accounts.buyer_authority.to_account_info(),
+                    associated_token: ctx.accounts.buyer_nft_account.to_account_info(),
+                    authority: ctx.accounts.buyer_authority.to_account_info(),
+                    mint: ctx.accounts.nft_mint.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                }
+            ))
+        } else {
+            
+            Ok(())
+        }
+}
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
 
+#[derive(Accounts)]
+pub struct BuyNft<'info> {
+    #[account(mut)]
+    pub buyer_authority: Signer<'info>,
+    #[account(mut)]
+    pub buyer_nft_account: AccountInfo<'info>,
+    pub nft_mint: Account<'info, Mint>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+}
 #[derive(Accounts)]
 #[instruction(name: String)]
 pub struct InitProfile<'info> {
