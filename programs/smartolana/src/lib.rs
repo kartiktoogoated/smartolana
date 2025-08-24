@@ -8,13 +8,13 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program_pack::Pack;
 use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::associated_token::{self, Create};
 use anchor_spl::token::spl_token::state::Mint as SplMint;
 use anchor_spl::token::{
     self, set_authority, spl_token, Burn, InitializeMint, Mint, MintTo, SetAuthority, Token,
     TokenAccount, Transfer,
 };
 use spl_token::instruction::AuthorityType;
-use anchor_spl::associated_token::{self, Create};
 
 declare_id!("BH2vhWg3AJqKn5VXKf6nepTPQUigJEhPEApUo9XXekjz");
 
@@ -1169,11 +1169,7 @@ pub mod smartolana {
         require!(fee_a > 0 || fee_b > 0, CustomError::NoProtocolFeesToCollect);
 
         let pool_key = pool.key();
-        let signer_seeds: &[&[&[u8]]] = &[&[
-            b"signer",
-            pool_key.as_ref(),
-            &[pool.signer_bump]
-        ]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"signer", pool_key.as_ref(), &[pool.signer_bump]]];
 
         // Transfer token A protocol fee
         if fee_a > 0 {
@@ -1198,60 +1194,60 @@ pub mod smartolana {
                     to: ctx.accounts.protocol_fee_recipient_b.to_account_info(),
                     authority: ctx.accounts.pool_signer.to_account_info(),
                 },
-                signer_seeds
+                signer_seeds,
             );
             token::transfer(cpi_ctx_b, fee_b)?;
         }
 
-            // Reset protocol fees after collection
-            pool.protocol_fee_a = 0;
-            pool.protocol_fee_b = 0;
+        // Reset protocol fees after collection
+        pool.protocol_fee_a = 0;
+        pool.protocol_fee_b = 0;
 
-            msg!("Protocol fees collected: {} A, {} B", fee_a, fee_b);
+        msg!("Protocol fees collected: {} A, {} B", fee_a, fee_b);
 
         Ok(())
     }
 
-    pub fn handle_buy_nft(
-        ctx: Context<BuyNft>,
-    ) -> Result<()> {
-        let ata = associated_token::get_associated_token_address(
-            &ctx.accounts.buyer_authority.key(),
-            &ctx.accounts.nft_mint.key());
-        require!(ata == ctx.accounts.buyer_nft_account.key(), CustomError::AlreadyExecuted);
-    
-        if ctx.accounts.buyer_nft_account.data_len() == 0{
-            //create buyer nft token account
-            associated_token::create(CpiContext::new(ctx.accounts.associated_token_program.to_account_info(),
-            associated_token:: Create{
-                    payer: ctx.accounts.buyer_authority.to_account_info(),
-                    associated_token: ctx.accounts.buyer_nft_account.to_account_info(),
-                    authority: ctx.accounts.buyer_authority.to_account_info(),
-                    mint: ctx.accounts.nft_mint.to_account_info(),
-                    system_program: ctx.accounts.system_program.to_account_info(),
-                    token_program: ctx.accounts.token_program.to_account_info(),
-                }
-            ))
-        } else {
-            
-            Ok(())
-        }
-}
+    //     pub fn handle_buy_nft(
+    //         ctx: Context<BuyNft>,
+    //     ) -> Result<()> {
+    //         let ata = associated_token::get_associated_token_address(
+    //             &ctx.accounts.buyer_authority.key(),
+    //             &ctx.accounts.nft_mint.key());
+    //         require!(ata == ctx.accounts.buyer_nft_account.key(), CustomError::AlreadyExecuted);
+
+    //         if ctx.accounts.buyer_nft_account.data_len() == 0{
+    //             //create buyer nft token account
+    //             associated_token::create(CpiContext::new(ctx.accounts.associated_token_program.to_account_info(),
+    //             associated_token:: Create{
+    //                     payer: ctx.accounts.buyer_authority.to_account_info(),
+    //                     associated_token: ctx.accounts.buyer_nft_account.to_account_info(),
+    //                     authority: ctx.accounts.buyer_authority.to_account_info(),
+    //                     mint: ctx.accounts.nft_mint.to_account_info(),
+    //                     system_program: ctx.accounts.system_program.to_account_info(),
+    //                     token_program: ctx.accounts.token_program.to_account_info(),
+    //                 }
+    //             ))
+    //         } else {
+
+    //             Ok(())
+    //         }
+    // }
 }
 
 // ----------------- CONTEXT STRUCTS ---------------------
 
-#[derive(Accounts)]
-pub struct BuyNft<'info> {
-    #[account(mut)]
-    pub buyer_authority: Signer<'info>,
-    #[account(mut)]
-    pub buyer_nft_account: AccountInfo<'info>,
-    pub nft_mint: Account<'info, Mint>,
-    pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-}
+// #[derive(Accounts)]
+// pub struct BuyNft<'info> {
+//     #[account(mut)]
+//     pub buyer_authority: Signer<'info>,
+//     #[account(mut)]
+//     pub buyer_nft_account: AccountInfo<'info>,
+//     pub nft_mint: Account<'info, Mint>,
+//     pub system_program: Program<'info, System>,
+//     pub token_program: Program<'info, Token>,
+//     pub associated_token_program: Program<'info, AssociatedToken>,
+// }
 #[derive(Accounts)]
 #[instruction(name: String)]
 pub struct InitProfile<'info> {
